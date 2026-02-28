@@ -2,8 +2,7 @@
 //  BarcodeScanner.swift
 //  BarcodeKit
 //
-//  Protocol and placeholder for UPC barcode detection using Apple Vision
-//  framework. Implementation in PR 5.
+//  Protocol and types for UPC barcode detection using Apple Vision framework.
 //
 //  Created by Jake on 02/28/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
@@ -20,6 +19,12 @@ public struct BarcodeResult: Sendable, Equatable {
         self.value = value
         self.symbology = symbology
     }
+}
+
+/// Errors that can occur during barcode detection.
+public enum BarcodeError: Error, Sendable {
+    case invalidImageData
+    case detectionFailed(String)
 }
 
 /// Protocol for barcode scanning services.
