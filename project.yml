@@ -1,0 +1,77 @@
+name: LibraryScanner
+options:
+  bundleIdPrefix: org.wxyc
+  deploymentTarget:
+    iOS: "18.6"
+  xcodeVersion: "16.4"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.2"
+    SWIFT_STRICT_CONCURRENCY: complete
+    DEVELOPMENT_TEAM: 92V374HC38
+    CODE_SIGN_STYLE: Automatic
+    INFOPLIST_KEY_NSCameraUsageDescription: "Library Scanner needs camera access to photograph album covers and labels"
+
+configs:
+  Debug: debug
+  Release: release
+
+localPackages:
+  - Shared/ScannerLogger
+  - Shared/ScannerSecrets
+  - Shared/AuthKit
+  - Shared/BarcodeKit
+  - Shared/CameraKit
+  - Shared/CatalogClient
+  - Shared/ScannerKit
+  - Shared/ScannerUI
+
+packages:
+  ObfuscateMacro:
+    url: https://github.com/p-x9/ObfuscateMacro.git
+    majorVersion: "0.10.0"
+
+targets:
+  LibraryScanner:
+    type: application
+    platform: iOS
+    sources:
+      - path: LibraryScanner
+    dependencies:
+      - package: ScannerKit
+      - package: ScannerUI
+      - package: AuthKit
+      - package: CatalogClient
+      - package: CameraKit
+      - package: BarcodeKit
+      - package: ScannerLogger
+      - package: ScannerSecrets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.wxyc.library-scanner
+        TARGETED_DEVICE_FAMILY: "1"
+
+  LibraryScannerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LibraryScannerTests
+    dependencies:
+      - target: LibraryScanner
+
+schemes:
+  LibraryScanner:
+    build:
+      targets:
+        LibraryScanner: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - LibraryScannerTests
+    archive:
+      config: Release
