@@ -91,39 +91,107 @@ public struct ExtractionField: Sendable, Codable, Equatable {
     }
 }
 
-/// Status of a batch scan job.
-public struct BatchJobStatus: Sendable, Codable, Equatable {
-    public let id: String
+/// Response from batch job creation (`POST /library/scan/batch`).
+public struct BatchJobCreated: Sendable, Codable, Equatable {
+    public let jobId: String
     public let status: String
-    public let imageCount: Int
-    public let completedCount: Int
-    public let results: [BatchResult]?
+    public let totalItems: Int
 
-    public init(id: String, status: String, imageCount: Int, completedCount: Int, results: [BatchResult]?) {
-        self.id = id
+    public init(jobId: String, status: String, totalItems: Int) {
+        self.jobId = jobId
         self.status = status
-        self.imageCount = imageCount
-        self.completedCount = completedCount
-        self.results = results
+        self.totalItems = totalItems
     }
 }
 
-/// Result of a single image in a batch job.
-public struct BatchResult: Sendable, Codable, Identifiable, Equatable {
-    public let id: Int
-    public let imageIndex: Int
+/// Status of a batch scan job (`GET /library/scan/batch/:jobId`).
+public struct BatchJobStatus: Sendable, Codable, Equatable {
+    public let jobId: String
+    public let status: String
+    public let totalItems: Int
+    public let completedItems: Int
+    public let failedItems: Int
+    public let results: [BatchResult]?
+    public let createdAt: String?
+    public let updatedAt: String?
+
+    public init(
+        jobId: String,
+        status: String,
+        totalItems: Int,
+        completedItems: Int,
+        failedItems: Int,
+        results: [BatchResult]?,
+        createdAt: String? = nil,
+        updatedAt: String? = nil
+    ) {
+        self.jobId = jobId
+        self.status = status
+        self.totalItems = totalItems
+        self.completedItems = completedItems
+        self.failedItems = failedItems
+        self.results = results
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// Result of a single item in a batch job.
+public struct BatchResult: Sendable, Codable, Equatable {
+    public let itemIndex: Int
     public let status: String
     public let extraction: ExtractionResult?
     public let matchedAlbumId: Int?
-    public let error: String?
+    public let errorMessage: String?
 
-    public init(id: Int, imageIndex: Int, status: String, extraction: ExtractionResult?, matchedAlbumId: Int?, error: String?) {
-        self.id = id
-        self.imageIndex = imageIndex
+    public init(
+        itemIndex: Int,
+        status: String,
+        extraction: ExtractionResult?,
+        matchedAlbumId: Int?,
+        errorMessage: String?
+    ) {
+        self.itemIndex = itemIndex
         self.status = status
         self.extraction = extraction
         self.matchedAlbumId = matchedAlbumId
-        self.error = error
+        self.errorMessage = errorMessage
+    }
+}
+
+/// Describes one item in a batch submission manifest.
+public struct BatchManifestItem: Sendable, Codable, Equatable {
+    public let imageCount: Int
+    public let photoTypes: [String]
+    public let context: BatchContext
+
+    public init(imageCount: Int, photoTypes: [String], context: BatchContext) {
+        self.imageCount = imageCount
+        self.photoTypes = photoTypes
+        self.context = context
+    }
+}
+
+/// Contextual metadata for a batch item, aiding server-side matching.
+public struct BatchContext: Sendable, Codable, Equatable {
+    public let catalogItemId: Int?
+    public let stickerText: String?
+    public let detectedUPC: String?
+    public let artistName: String?
+    public let albumTitle: String?
+
+    public init(
+        catalogItemId: Int? = nil,
+        stickerText: String? = nil,
+        detectedUPC: String? = nil,
+        artistName: String? = nil,
+        albumTitle: String? = nil
+    ) {
+        self.catalogItemId = catalogItemId
+        self.stickerText = stickerText
+        self.detectedUPC = detectedUPC
+        self.artistName = artistName
+        self.albumTitle = albumTitle
     }
 }
 
@@ -140,8 +208,8 @@ public protocol CatalogServiceProtocol: Sendable {
     /// Submit images for single scan extraction.
     func submitScan(images: [Data], photoTypes: [String], catalogItemId: Int?, stickerText: String?, detectedUPC: String?) async throws -> ExtractionResult
 
-    /// Submit a batch of images for async processing.
-    func submitBatch(images: [Data], photoTypes: [String]) async throws -> String
+    /// Submit a batch of items with images for async processing.
+    func submitBatch(items: [BatchManifestItem], images: [Data]) async throws -> BatchJobCreated
 
     /// Poll batch job status.
     func batchStatus(jobId: String) async throws -> BatchJobStatus
