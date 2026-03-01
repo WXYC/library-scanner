@@ -3,7 +3,7 @@
 //  ScannerKit
 //
 //  Defines the phases of a scan session, used by the state machine
-//  to drive the UI workflow. Implementation in PR 6.
+//  to drive the UI workflow.
 //
 //  Created by Jake on 02/28/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.

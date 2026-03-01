@@ -21,7 +21,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CatalogClientTests",
-            dependencies: ["CatalogClient"]
+            dependencies: ["CatalogClient", "AuthKit"]
         ),
     ]
 )
