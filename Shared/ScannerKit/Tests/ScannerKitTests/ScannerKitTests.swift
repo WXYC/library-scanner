@@ -2,7 +2,7 @@
 //  ScannerKitTests.swift
 //  ScannerKit
 //
-//  Placeholder tests for ScannerKit. Full implementation in PR 6.
+//  Tests for ScanPhase enum construction and equality.
 //
 //  Created by Jake on 02/28/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.

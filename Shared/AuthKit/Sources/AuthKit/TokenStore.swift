@@ -12,6 +12,7 @@
 
 import Foundation
 import Security
+import ScannerLogger
 
 // MARK: - Protocol
 

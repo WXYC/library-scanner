@@ -2,8 +2,8 @@
 //  CatalogService.swift
 //  CatalogClient
 //
-//  Protocol for communicating with the Backend-Service catalog and scanner
-//  endpoints. Implementation in PR 6.
+//  Protocol and models for communicating with the Backend-Service catalog
+//  and scanner endpoints.
 //
 //  Created by Jake on 02/28/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
@@ -24,6 +24,18 @@ public struct CatalogItem: Sendable, Codable, Identifiable, Equatable {
     public let genreName: String
     public let formatName: String
     public let label: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case artistName = "artist_name"
+        case albumTitle = "album_title"
+        case codeLetters = "code_letters"
+        case codeArtistNumber = "code_artist_number"
+        case codeNumber = "code_number"
+        case genreName = "genre_name"
+        case formatName = "format_name"
+        case label
+    }
 
     public init(
         id: Int,

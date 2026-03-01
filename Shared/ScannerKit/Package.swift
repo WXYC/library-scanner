@@ -23,7 +23,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ScannerKitTests",
-            dependencies: ["ScannerKit"]
+            dependencies: ["ScannerKit", "CatalogClient", "CameraKit", "BarcodeKit"]
         ),
     ]
 )
