@@ -134,12 +134,51 @@ public final class CatalogService: CatalogServiceProtocol, @unchecked Sendable {
         return scanResponse.extraction
     }
 
-    public func submitBatch(images: [Data], photoTypes: [String]) async throws -> String {
-        throw CatalogError.badRequest("Not yet implemented")
+    public func submitBatch(
+        items: [BatchManifestItem],
+        images: [Data]
+    ) async throws -> BatchJobCreated {
+        var form = MultipartFormData()
+
+        let manifestData = try JSONEncoder().encode(items)
+        let manifestString = String(data: manifestData, encoding: .utf8) ?? "[]"
+        form.addField(name: "manifest", value: manifestString)
+
+        for (index, imageData) in images.enumerated() {
+            form.addFile(
+                name: "images",
+                filename: "image_\(index).heic",
+                mimeType: "image/heic",
+                data: imageData
+            )
+        }
+
+        let token = try await tokenProvider.validAccessToken()
+        let url = URL(string: "\(baseURL)/library/scan/batch")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = form.body
+
+        Log(.info, category: .network, "Submitting batch with \(images.count) image(s) across \(items.count) item(s)")
+
+        let (data, response) = try await performRequest(request)
+        try handleResponse(response)
+        return try decode(BatchJobCreated.self, from: data)
     }
 
     public func batchStatus(jobId: String) async throws -> BatchJobStatus {
-        throw CatalogError.badRequest("Not yet implemented")
+        let request = try await authenticatedRequest(
+            method: "GET",
+            path: "/library/scan/batch/\(jobId)"
+        )
+
+        Log(.info, category: .network, "Polling batch status for job \(jobId)")
+
+        let (data, response) = try await performRequest(request)
+        try handleResponse(response)
+        return try decode(BatchJobStatus.self, from: data)
     }
 
     public func updateAlbum(

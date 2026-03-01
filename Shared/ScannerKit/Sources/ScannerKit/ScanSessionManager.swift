@@ -2,8 +2,8 @@
 //  ScanSessionManager.swift
 //  ScannerKit
 //
-//  Observable state machine driving the single-scan workflow. Manages
-//  phase transitions from sticker capture through extraction review.
+//  Observable state machine driving scan workflows. Manages phase
+//  transitions for both single-scan and batch capture modes.
 //
 //  Created by Jake on 02/28/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
@@ -16,7 +16,7 @@ import BarcodeKit
 import ScannerLogger
 
 /// A captured photo with its image data and descriptive type label.
-public struct CapturedPhotoEntry: Sendable {
+public struct CapturedPhotoEntry: Sendable, Equatable {
     public let data: Data
     public let type: String
 
@@ -26,14 +26,16 @@ public struct CapturedPhotoEntry: Sendable {
     }
 }
 
-/// Drives the single-scan workflow through phase transitions.
+/// Drives single-scan and batch capture workflows through phase transitions.
 ///
-/// Views observe `phase` to determine which screen to show.
-/// All state mutations happen on the main actor.
+/// Views observe `phase` for single-scan and `batchPhase` for batch mode
+/// to determine which screen to show. All state mutations happen on the main actor.
 @MainActor
 @Observable
 public final class ScanSessionManager {
-    /// The current phase of the scan workflow.
+    // MARK: - Single-Scan State
+
+    /// The current phase of the single-scan workflow.
     public private(set) var phase: ScanPhase = .idle
 
     /// Photos captured during this scan session.
@@ -50,6 +52,30 @@ public final class ScanSessionManager {
 
     /// Maximum number of photos per scan session.
     public static let maxPhotos = 5
+
+    // MARK: - Batch State
+
+    /// The current phase of the batch capture workflow.
+    public private(set) var batchPhase: BatchPhase = .idle
+
+    /// Items in the current batch, each grouping photos of one record.
+    public private(set) var batchItems: [BatchItem] = []
+
+    /// Maximum number of items in a single batch.
+    public static let maxBatchItems = 10
+
+    /// Maximum total photos across all items in a batch.
+    public static let maxTotalBatchPhotos = 50
+
+    /// Total number of photos across all batch items.
+    public var totalBatchPhotos: Int {
+        batchItems.reduce(0) { $0 + $1.photos.count }
+    }
+
+    /// The last item in the batch, or nil if the batch is empty.
+    public var currentBatchItem: BatchItem? {
+        batchItems.last
+    }
 
     private let catalogService: any CatalogServiceProtocol
     private let cameraService: any CameraServiceProtocol
@@ -202,5 +228,82 @@ public final class ScanSessionManager {
         matchedItem = nil
         stickerText = nil
         detectedUPC = nil
+    }
+
+    // MARK: - Batch Capture
+
+    /// Begin a new batch capture session.
+    public func startBatchCapture() {
+        Log(.info, category: .scan, "Starting batch capture")
+        batchPhase = .capturing
+        batchItems = [BatchItem()]
+    }
+
+    /// Add a photo to the current (last) batch item.
+    public func addPhotoToCurrentItem(data: Data, type: String) {
+        guard !batchItems.isEmpty else { return }
+        let lastIndex = batchItems.count - 1
+        guard batchItems[lastIndex].photos.count < Self.maxPhotos else {
+            Log(.warning, category: .scan, "Per-item photo limit (\(Self.maxPhotos)) reached")
+            return
+        }
+
+        batchItems[lastIndex].photos.append(CapturedPhotoEntry(data: data, type: type))
+        Log(.info, category: .scan, "Batch item \(lastIndex): added photo (\(type)), total batch photos: \(totalBatchPhotos)")
+    }
+
+    /// Finalize the current item and create a new empty one for the next record.
+    public func finalizeCurrentItem() {
+        guard batchItems.count < Self.maxBatchItems else {
+            Log(.warning, category: .scan, "Max batch items (\(Self.maxBatchItems)) reached")
+            return
+        }
+
+        batchItems.append(BatchItem())
+        Log(.info, category: .scan, "Finalized item, starting item \(batchItems.count)")
+    }
+
+    /// Remove a batch item at the given index.
+    public func removeItemFromBatch(at index: Int) {
+        guard batchItems.indices.contains(index) else { return }
+        batchItems.remove(at: index)
+        Log(.info, category: .scan, "Removed batch item at index \(index), \(batchItems.count) remaining")
+    }
+
+    /// Submit the batch to the server for async processing.
+    public func submitBatch() async {
+        batchPhase = .submitting
+        Log(.info, category: .scan, "Submitting batch with \(batchItems.count) item(s), \(totalBatchPhotos) photo(s)")
+
+        let manifestItems = batchItems.map { item in
+            BatchManifestItem(
+                imageCount: item.photos.count,
+                photoTypes: item.photos.map(\.type),
+                context: BatchContext(
+                    catalogItemId: item.catalogMatch?.id,
+                    stickerText: item.stickerText,
+                    detectedUPC: item.detectedUPC,
+                    artistName: item.catalogMatch?.artistName,
+                    albumTitle: item.catalogMatch?.albumTitle
+                )
+            )
+        }
+        let allImages = batchItems.flatMap { $0.photos.map(\.data) }
+
+        do {
+            let result = try await catalogService.submitBatch(items: manifestItems, images: allImages)
+            batchPhase = .polling(jobId: result.jobId)
+            Log(.info, category: .scan, "Batch submitted, job ID: \(result.jobId)")
+        } catch {
+            batchPhase = .error(error.localizedDescription)
+            Log(.error, category: .scan, "Batch submission failed: \(error)")
+        }
+    }
+
+    /// Reset all batch state to idle.
+    public func resetBatch() {
+        Log(.info, category: .scan, "Resetting batch")
+        batchPhase = .idle
+        batchItems = []
     }
 }

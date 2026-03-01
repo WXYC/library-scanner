@@ -210,21 +210,140 @@ struct CatalogServiceTests {
         try await service.upsertReview(albumId: 42, review: "Great album", author: "DJ Test")
     }
 
-    @Test("submitBatch throws badRequest (not yet implemented)")
-    func submitBatchNotImplemented() async {
-        let (service, _) = makeServiceWithMock()
+    @Test("submitBatch sends POST multipart with images and manifest JSON")
+    func submitBatch() async throws {
+        let (service, mock) = makeServiceWithMock()
 
-        await #expect(throws: CatalogError.badRequest("Not yet implemented")) {
-            try await service.submitBatch(images: [], photoTypes: [])
+        mock.handler = { request in
+            #expect(request.httpMethod == "POST")
+            #expect(request.url!.path.hasSuffix("/library/scan/batch"))
+            let contentType = request.value(forHTTPHeaderField: "Content-Type")!
+            #expect(contentType.hasPrefix("multipart/form-data; boundary="))
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+
+            let json = """
+            {
+                "jobId": "job-abc",
+                "status": "pending",
+                "totalItems": 2
+            }
+            """
+            return (json.data(using: .utf8)!, 202)
         }
+
+        let items = [
+            BatchManifestItem(
+                imageCount: 2,
+                photoTypes: ["front", "back"],
+                context: BatchContext(catalogItemId: 42)
+            ),
+            BatchManifestItem(
+                imageCount: 1,
+                photoTypes: ["front"],
+                context: BatchContext(stickerText: "ROCK AB 01/05")
+            ),
+        ]
+        let images = [Data([0x01]), Data([0x02]), Data([0x03])]
+
+        let result = try await service.submitBatch(items: items, images: images)
+        #expect(result.jobId == "job-abc")
+        #expect(result.status == "pending")
+        #expect(result.totalItems == 2)
     }
 
-    @Test("batchStatus throws badRequest (not yet implemented)")
-    func batchStatusNotImplemented() async {
-        let (service, _) = makeServiceWithMock()
+    @Test("submitBatch manifest field contains correct item structure")
+    func submitBatchManifest() async throws {
+        let (service, mock) = makeServiceWithMock()
 
-        await #expect(throws: CatalogError.badRequest("Not yet implemented")) {
-            try await service.batchStatus(jobId: "test-job")
+        mock.handler = { request in
+            if let bodyData = request.bodyData {
+                // Search for manifest and images markers in raw bytes
+                // (body contains binary image data, so full UTF-8 conversion may fail)
+                let manifestMarker = Data("name=\"manifest\"".utf8)
+                let imagesMarker = Data("name=\"images\"".utf8)
+                #expect(bodyData.range(of: manifestMarker) != nil)
+                #expect(bodyData.range(of: imagesMarker) != nil)
+            }
+
+            let json = """
+            {"jobId": "job-xyz", "status": "pending", "totalItems": 1}
+            """
+            return (json.data(using: .utf8)!, 202)
+        }
+
+        let items = [
+            BatchManifestItem(
+                imageCount: 1,
+                photoTypes: ["front"],
+                context: BatchContext(artistName: "Radiohead", albumTitle: "OK Computer")
+            ),
+        ]
+
+        _ = try await service.submitBatch(items: items, images: [Data([0xFF])])
+    }
+
+    @Test("batchStatus sends GET with jobId and decodes BatchJobStatus")
+    func batchStatus() async throws {
+        let (service, mock) = makeServiceWithMock()
+
+        mock.handler = { request in
+            #expect(request.httpMethod == "GET")
+            #expect(request.url!.path.hasSuffix("/library/scan/batch/job-123"))
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+
+            let json = """
+            {
+                "jobId": "job-123",
+                "status": "completed",
+                "totalItems": 2,
+                "completedItems": 2,
+                "failedItems": 0,
+                "results": [
+                    {
+                        "itemIndex": 0,
+                        "status": "completed",
+                        "extraction": {
+                            "labelName": {"value": "Elektra", "confidence": 0.9},
+                            "catalogNumber": null,
+                            "reviewText": null,
+                            "upc": null
+                        },
+                        "matchedAlbumId": 42,
+                        "errorMessage": null
+                    },
+                    {
+                        "itemIndex": 1,
+                        "status": "completed",
+                        "extraction": null,
+                        "matchedAlbumId": null,
+                        "errorMessage": null
+                    }
+                ]
+            }
+            """
+            return (json.data(using: .utf8)!, 200)
+        }
+
+        let status = try await service.batchStatus(jobId: "job-123")
+        #expect(status.jobId == "job-123")
+        #expect(status.status == "completed")
+        #expect(status.totalItems == 2)
+        #expect(status.completedItems == 2)
+        #expect(status.failedItems == 0)
+        #expect(status.results?.count == 2)
+        #expect(status.results?[0].extraction?.labelName?.value == "Elektra")
+    }
+
+    @Test("batchStatus 404 throws notFound")
+    func batchStatusNotFound() async {
+        let (service, mock) = makeServiceWithMock()
+
+        mock.handler = { _ in
+            return ("Not Found".data(using: .utf8)!, 404)
+        }
+
+        await #expect(throws: CatalogError.notFound) {
+            try await service.batchStatus(jobId: "nonexistent")
         }
     }
 
