@@ -3,7 +3,7 @@
 //  LibraryScanner
 //
 //  Root tab view shown after authentication. Provides tabs for
-//  batch capture, review, and history.
+//  batch capture, review, history, and settings.
 //
 //  Created by Jake on 02/28/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
@@ -18,7 +18,7 @@ struct MainTabView: View {
     var body: some View {
         TabView {
             Tab("Capture", systemImage: "camera") {
-                CapturePlaceholderView()
+                CaptureView()
             }
 
             Tab("Review", systemImage: "checklist") {
@@ -38,21 +38,7 @@ struct MainTabView: View {
 
 // MARK: - Placeholder Views
 
-/// Placeholder for the batch capture view. Implementation in PR 5.
-private struct CapturePlaceholderView: View {
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(
-                "Camera",
-                systemImage: "camera.viewfinder",
-                description: Text("Batch capture coming soon.")
-            )
-            .navigationTitle("Capture")
-        }
-    }
-}
-
-/// Placeholder for the review view. Implementation in PR 6.
+/// Placeholder for the review view. Implementation in PR 8.
 private struct ReviewPlaceholderView: View {
     var body: some View {
         NavigationStack {
