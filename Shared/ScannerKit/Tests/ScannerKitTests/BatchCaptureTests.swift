@@ -258,6 +258,266 @@ struct BatchStateManagementTests {
     }
 }
 
+// MARK: - Polling Tests
+
+@Suite("ScanSessionManager Polling")
+struct PollingTests {
+    @Test("startPolling transitions to completed when status is completed")
+    @MainActor
+    func startPollingCompletes() async throws {
+        let catalogService = MockCatalogService()
+        catalogService.batchStatusResult = BatchJobStatus(
+            jobId: "job-1", status: "completed", totalItems: 1,
+            completedItems: 1, failedItems: 0, results: []
+        )
+        let manager = makeBatchManager(catalogService: catalogService)
+        manager.startPolling(jobId: "job-1", initialDelay: .milliseconds(10))
+
+        // Give the polling loop time to run
+        try await Task.sleep(for: .milliseconds(100))
+
+        if case .completed(let status) = manager.batchPhase {
+            #expect(status.jobId == "job-1")
+            #expect(status.status == "completed")
+        } else {
+            Issue.record("Expected completed phase, got \(manager.batchPhase)")
+        }
+    }
+
+    @Test("startPolling transitions to completed when status is failed")
+    @MainActor
+    func startPollingFailed() async throws {
+        let catalogService = MockCatalogService()
+        catalogService.batchStatusResult = BatchJobStatus(
+            jobId: "job-2", status: "failed", totalItems: 1,
+            completedItems: 0, failedItems: 1, results: []
+        )
+        let manager = makeBatchManager(catalogService: catalogService)
+        manager.startPolling(jobId: "job-2", initialDelay: .milliseconds(10))
+
+        try await Task.sleep(for: .milliseconds(100))
+
+        if case .completed(let status) = manager.batchPhase {
+            #expect(status.status == "failed")
+        } else {
+            Issue.record("Expected completed phase, got \(manager.batchPhase)")
+        }
+    }
+
+    @Test("startPolling retries when status is processing")
+    @MainActor
+    func startPollingRetries() async throws {
+        let catalogService = MockCatalogService()
+        var callCount = 0
+        catalogService.batchStatusHandler = { jobId in
+            callCount += 1
+            if callCount >= 3 {
+                return BatchJobStatus(
+                    jobId: jobId, status: "completed", totalItems: 1,
+                    completedItems: 1, failedItems: 0, results: []
+                )
+            }
+            return BatchJobStatus(
+                jobId: jobId, status: "processing", totalItems: 1,
+                completedItems: 0, failedItems: 0, results: nil
+            )
+        }
+
+        let manager = makeBatchManager(catalogService: catalogService)
+        manager.startPolling(jobId: "job-3", initialDelay: .milliseconds(10))
+
+        try await Task.sleep(for: .milliseconds(500))
+
+        #expect(catalogService.batchStatusCallCount >= 3)
+        if case .completed = manager.batchPhase {
+            // Expected
+        } else {
+            Issue.record("Expected completed phase, got \(manager.batchPhase)")
+        }
+    }
+
+    @Test("startPolling transitions to error on network failure")
+    @MainActor
+    func startPollingNetworkError() async throws {
+        let catalogService = MockCatalogService()
+        catalogService.batchStatusError = CatalogError.networkError("Connection lost")
+
+        let manager = makeBatchManager(catalogService: catalogService)
+        manager.startPolling(jobId: "job-4", initialDelay: .milliseconds(10))
+
+        try await Task.sleep(for: .milliseconds(100))
+
+        if case .error = manager.batchPhase {
+            // Expected
+        } else {
+            Issue.record("Expected error phase, got \(manager.batchPhase)")
+        }
+    }
+
+    @Test("cancelPolling prevents completion transition")
+    @MainActor
+    func cancelPollingPreventsTransition() async throws {
+        let catalogService = MockCatalogService()
+        // Return processing so it keeps polling
+        catalogService.batchStatusHandler = { jobId in
+            // Delay to simulate network
+            try await Task.sleep(for: .milliseconds(50))
+            return BatchJobStatus(
+                jobId: jobId, status: "completed", totalItems: 1,
+                completedItems: 1, failedItems: 0, results: []
+            )
+        }
+
+        let manager = makeBatchManager(catalogService: catalogService)
+        manager.startPolling(jobId: "job-5", initialDelay: .milliseconds(200))
+
+        // Cancel before the first poll completes
+        manager.cancelPolling()
+        try await Task.sleep(for: .milliseconds(300))
+
+        // Phase should not have changed to completed
+        if case .completed = manager.batchPhase {
+            Issue.record("Should not have transitioned to completed after cancel")
+        }
+    }
+
+    @Test("resetBatch cancels active polling")
+    @MainActor
+    func resetBatchCancelsPolling() async throws {
+        let catalogService = MockCatalogService()
+        catalogService.batchStatusHandler = { jobId in
+            try await Task.sleep(for: .milliseconds(100))
+            return BatchJobStatus(
+                jobId: jobId, status: "completed", totalItems: 1,
+                completedItems: 1, failedItems: 0, results: []
+            )
+        }
+
+        let manager = makeBatchManager(catalogService: catalogService)
+        manager.startPolling(jobId: "job-6", initialDelay: .milliseconds(200))
+
+        manager.resetBatch()
+        try await Task.sleep(for: .milliseconds(400))
+
+        #expect(manager.batchPhase == .idle)
+        #expect(manager.batchItems.isEmpty)
+    }
+
+    @Test("submitBatch auto-starts polling after success")
+    @MainActor
+    func submitBatchAutoStartsPolling() async throws {
+        let catalogService = MockCatalogService()
+        catalogService.submitBatchResult = BatchJobCreated(
+            jobId: "job-auto", status: "pending", totalItems: 1
+        )
+        catalogService.batchStatusResult = BatchJobStatus(
+            jobId: "job-auto", status: "completed", totalItems: 1,
+            completedItems: 1, failedItems: 0, results: []
+        )
+
+        let manager = makeBatchManager(catalogService: catalogService)
+        manager.startBatchCapture()
+        manager.addPhotoToCurrentItem(data: Data([0x01]), type: "front")
+
+        await manager.submitBatch()
+
+        // Give polling time to run
+        try await Task.sleep(for: .milliseconds(200))
+
+        if case .completed(let status) = manager.batchPhase {
+            #expect(status.jobId == "job-auto")
+        } else {
+            Issue.record("Expected completed phase, got \(manager.batchPhase)")
+        }
+    }
+}
+
+// MARK: - Camera Wrapper Tests
+
+@Suite("ScanSessionManager Camera")
+struct CameraWrapperTests {
+    @Test("startCamera calls cameraService.startSession()")
+    @MainActor
+    func startCamera() async throws {
+        let cameraService = MockCameraService()
+        let manager = makeBatchManager(cameraService: cameraService)
+        try await manager.startCamera()
+        #expect(cameraService.startSessionCalled)
+    }
+
+    @Test("stopCamera calls cameraService.stopSession()")
+    @MainActor
+    func stopCamera() async {
+        let cameraService = MockCameraService()
+        let manager = makeBatchManager(cameraService: cameraService)
+        await manager.stopCamera()
+        #expect(cameraService.stopSessionCalled)
+    }
+
+    @Test("capturePhotoForBatch captures photo and adds to current batch item")
+    @MainActor
+    func capturePhotoForBatch() async throws {
+        let cameraService = MockCameraService()
+        cameraService.capturePhotoResult = CapturedPhoto(
+            imageData: Data([0xAA, 0xBB]), originalWidth: 200, originalHeight: 200
+        )
+        let manager = makeBatchManager(cameraService: cameraService)
+        manager.startBatchCapture()
+
+        try await manager.capturePhotoForBatch()
+
+        #expect(cameraService.capturePhotoCalled)
+        #expect(manager.batchItems[0].photos.count == 1)
+        #expect(manager.batchItems[0].photos[0].data == Data([0xAA, 0xBB]))
+        #expect(manager.batchItems[0].photos[0].type == "front")
+    }
+
+    @Test("capturePhotoForBatch runs barcode detection on first photo")
+    @MainActor
+    func captureRunsBarcodeOnFirst() async throws {
+        let barcodeScanner = MockBarcodeScanner()
+        barcodeScanner.barcodes = [BarcodeResult(value: "012345678901", symbology: "ean13")]
+        let manager = makeBatchManager(barcodeScanner: barcodeScanner)
+        manager.startBatchCapture()
+
+        try await manager.capturePhotoForBatch()
+
+        #expect(barcodeScanner.detectBarcodesCalled == 1)
+        #expect(manager.batchItems[0].detectedUPC == "012345678901")
+    }
+
+    @Test("capturePhotoForBatch skips barcode detection on subsequent photos")
+    @MainActor
+    func captureSkipsBarcodeOnSubsequent() async throws {
+        let barcodeScanner = MockBarcodeScanner()
+        barcodeScanner.barcodes = [BarcodeResult(value: "012345678901", symbology: "ean13")]
+        let manager = makeBatchManager(barcodeScanner: barcodeScanner)
+        manager.startBatchCapture()
+
+        try await manager.capturePhotoForBatch()
+        try await manager.capturePhotoForBatch()
+
+        #expect(barcodeScanner.detectBarcodesCalled == 1)
+        #expect(manager.batchItems[0].photos.count == 2)
+        #expect(manager.batchItems[0].photos[1].type == "photo")
+    }
+
+    @Test("capturePhotoForBatch handles barcode detection failure gracefully")
+    @MainActor
+    func captureBarcodeFailureGraceful() async throws {
+        let barcodeScanner = MockBarcodeScanner()
+        barcodeScanner.detectError = BarcodeError.detectionFailed("No barcodes")
+        let manager = makeBatchManager(barcodeScanner: barcodeScanner)
+        manager.startBatchCapture()
+
+        try await manager.capturePhotoForBatch()
+
+        // Photo should still be added even if barcode fails
+        #expect(manager.batchItems[0].photos.count == 1)
+        #expect(manager.batchItems[0].detectedUPC == nil)
+    }
+}
+
 // MARK: - Test Helpers
 
 @MainActor
@@ -284,6 +544,8 @@ final class MockCatalogService: CatalogServiceProtocol, @unchecked Sendable {
     var submitBatchError: (any Error)?
     var batchStatusResult: BatchJobStatus?
     var batchStatusError: (any Error)?
+    var batchStatusHandler: ((String) async throws -> BatchJobStatus)?
+    var batchStatusCallCount = 0
     var updateAlbumCalled = false
     var upsertReviewCalled = false
     var lastUpdateAlbumId: Int?
@@ -314,6 +576,8 @@ final class MockCatalogService: CatalogServiceProtocol, @unchecked Sendable {
     }
 
     func batchStatus(jobId: String) async throws -> BatchJobStatus {
+        batchStatusCallCount += 1
+        if let handler = batchStatusHandler { return try await handler(jobId) }
         if let error = batchStatusError { throw error }
         return batchStatusResult ?? BatchJobStatus(
             jobId: jobId, status: "pending", totalItems: 0,
@@ -336,19 +600,36 @@ final class MockCatalogService: CatalogServiceProtocol, @unchecked Sendable {
 @preconcurrency import AVFoundation
 
 final class MockCameraService: CameraServiceProtocol, @unchecked Sendable {
-    var previewSession: AVCaptureSession { AVCaptureSession() }
+    private let _previewSession = AVCaptureSession()
+    var previewSession: AVCaptureSession { _previewSession }
 
-    func startSession() async throws {}
-    func stopSession() async {}
+    var startSessionCalled = false
+    var stopSessionCalled = false
+    var capturePhotoCalled = false
+    var capturePhotoResult = CapturedPhoto(imageData: Data([0xFF]), originalWidth: 100, originalHeight: 100)
+
+    func startSession() async throws {
+        startSessionCalled = true
+    }
+
+    func stopSession() async {
+        stopSessionCalled = true
+    }
+
     func capturePhoto() async throws -> CapturedPhoto {
-        CapturedPhoto(imageData: Data([0xFF]), originalWidth: 100, originalHeight: 100)
+        capturePhotoCalled = true
+        return capturePhotoResult
     }
 }
 
 final class MockBarcodeScanner: BarcodeScannerProtocol, @unchecked Sendable {
     var barcodes: [BarcodeResult] = []
+    var detectBarcodesCalled = 0
+    var detectError: (any Error)?
 
     func detectBarcodes(in imageData: Data) async throws -> [BarcodeResult] {
-        barcodes
+        detectBarcodesCalled += 1
+        if let error = detectError { throw error }
+        return barcodes
     }
 }

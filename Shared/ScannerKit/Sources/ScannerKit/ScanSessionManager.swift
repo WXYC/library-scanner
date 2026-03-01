@@ -10,6 +10,7 @@
 //
 
 import Foundation
+@preconcurrency import AVFoundation
 import CatalogClient
 import CameraKit
 import BarcodeKit
@@ -80,6 +81,7 @@ public final class ScanSessionManager {
     private let catalogService: any CatalogServiceProtocol
     private let cameraService: any CameraServiceProtocol
     private let barcodeScanner: any BarcodeScannerProtocol
+    private var pollingTask: Task<Void, Never>?
 
     public init(
         catalogService: any CatalogServiceProtocol,
@@ -294,6 +296,7 @@ public final class ScanSessionManager {
             let result = try await catalogService.submitBatch(items: manifestItems, images: allImages)
             batchPhase = .polling(jobId: result.jobId)
             Log(.info, category: .scan, "Batch submitted, job ID: \(result.jobId)")
+            startPolling(jobId: result.jobId)
         } catch {
             batchPhase = .error(error.localizedDescription)
             Log(.error, category: .scan, "Batch submission failed: \(error)")
@@ -303,7 +306,96 @@ public final class ScanSessionManager {
     /// Reset all batch state to idle.
     public func resetBatch() {
         Log(.info, category: .scan, "Resetting batch")
+        cancelPolling()
         batchPhase = .idle
         batchItems = []
+    }
+
+    // MARK: - Polling
+
+    /// Begin polling the server for batch job status.
+    ///
+    /// - Parameters:
+    ///   - jobId: The batch job identifier to poll.
+    ///   - initialDelay: Delay between polls (doubles each retry, capped at 15s).
+    ///     Defaults to 2 seconds; use `.milliseconds(10)` in tests.
+    public func startPolling(jobId: String, initialDelay: Duration = .seconds(2)) {
+        cancelPolling()
+        Log(.info, category: .scan, "Starting polling for job \(jobId)")
+        pollingTask = Task { [weak self] in
+            await self?.pollLoop(jobId: jobId, initialDelay: initialDelay)
+        }
+    }
+
+    /// Cancel any active polling task.
+    public func cancelPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
+    }
+
+    private func pollLoop(jobId: String, initialDelay: Duration) async {
+        var delay = initialDelay
+        let maxDelay: Duration = .seconds(15)
+
+        while !Task.isCancelled {
+            do {
+                let status = try await catalogService.batchStatus(jobId: jobId)
+                guard !Task.isCancelled else { return }
+                if status.status == "completed" || status.status == "failed" {
+                    batchPhase = .completed(status)
+                    Log(.info, category: .scan, "Batch job \(jobId) finished: \(status.status)")
+                    return
+                }
+                try await Task.sleep(for: delay)
+                delay = min(delay * 2, maxDelay)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                batchPhase = .error(error.localizedDescription)
+                Log(.error, category: .scan, "Polling failed for job \(jobId): \(error)")
+                return
+            }
+        }
+    }
+
+    // MARK: - Camera
+
+    /// The underlying capture session for preview layer integration.
+    public var previewSession: AVCaptureSession {
+        cameraService.previewSession
+    }
+
+    /// Start the camera capture session.
+    public func startCamera() async throws {
+        try await cameraService.startSession()
+    }
+
+    /// Stop the camera capture session.
+    public func stopCamera() async {
+        await cameraService.stopSession()
+    }
+
+    /// Capture a photo and add it to the current batch item.
+    ///
+    /// Runs barcode detection on the first photo of each item (the front cover
+    /// is most likely to have a UPC). Subsequent photos skip barcode detection.
+    public func capturePhotoForBatch() async throws {
+        let photo = try await cameraService.capturePhoto()
+        let isFirstPhoto = currentBatchItem?.photos.isEmpty ?? true
+        let type = isFirstPhoto ? "front" : "photo"
+        addPhotoToCurrentItem(data: photo.imageData, type: type)
+
+        if isFirstPhoto {
+            do {
+                let barcodes = try await barcodeScanner.detectBarcodes(in: photo.imageData)
+                if let upc = barcodes.first?.value, !batchItems.isEmpty {
+                    batchItems[batchItems.count - 1].detectedUPC = upc
+                    Log(.info, category: .scan, "Detected UPC: \(upc)")
+                }
+            } catch {
+                Log(.warning, category: .scan, "Barcode detection failed: \(error)")
+            }
+        }
     }
 }
