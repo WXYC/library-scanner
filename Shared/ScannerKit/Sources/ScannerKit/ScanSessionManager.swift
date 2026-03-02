@@ -20,10 +20,13 @@ import ScannerLogger
 public struct CapturedPhotoEntry: Sendable, Equatable {
     public let data: Data
     public let type: String
+    /// File URL where the photo was persisted to disk, if available.
+    public var fileURL: URL?
 
-    public init(data: Data, type: String) {
+    public init(data: Data, type: String, fileURL: URL? = nil) {
         self.data = data
         self.type = type
+        self.fileURL = fileURL
     }
 }
 
@@ -81,16 +84,19 @@ public final class ScanSessionManager {
     private let catalogService: any CatalogServiceProtocol
     private let cameraService: any CameraServiceProtocol
     private let barcodeScanner: any BarcodeScannerProtocol
+    private let photoStorage: (any PhotoStorageProtocol)?
     private var pollingTask: Task<Void, Never>?
 
     public init(
         catalogService: any CatalogServiceProtocol,
         cameraService: any CameraServiceProtocol,
-        barcodeScanner: any BarcodeScannerProtocol
+        barcodeScanner: any BarcodeScannerProtocol,
+        photoStorage: (any PhotoStorageProtocol)? = nil
     ) {
         self.catalogService = catalogService
         self.cameraService = cameraService
         self.barcodeScanner = barcodeScanner
+        self.photoStorage = photoStorage
     }
 
     // MARK: - Phase Transitions
@@ -250,8 +256,23 @@ public final class ScanSessionManager {
             return
         }
 
+        let photoIndex = batchItems[lastIndex].photos.count
         batchItems[lastIndex].photos.append(CapturedPhotoEntry(data: data, type: type))
         Log(.info, category: .scan, "Batch item \(lastIndex): added photo (\(type)), total batch photos: \(totalBatchPhotos)")
+
+        if let storage = photoStorage {
+            let batchItemId = batchItems[lastIndex].id
+            Task { [weak self] in
+                do {
+                    let url = try await storage.save(data: data, batchItemId: batchItemId, photoIndex: photoIndex)
+                    guard let self, self.batchItems.indices.contains(lastIndex),
+                          self.batchItems[lastIndex].id == batchItemId else { return }
+                    self.batchItems[lastIndex].photos[photoIndex].fileURL = url
+                } catch {
+                    Log(.warning, category: .scan, "Failed to save photo to disk: \(error)")
+                }
+            }
+        }
     }
 
     /// Finalize the current item and create a new empty one for the next record.
@@ -309,6 +330,16 @@ public final class ScanSessionManager {
         cancelPolling()
         batchPhase = .idle
         batchItems = []
+
+        if let storage = photoStorage {
+            Task {
+                do {
+                    try await storage.deleteAll()
+                } catch {
+                    Log(.warning, category: .scan, "Failed to delete batch photos: \(error)")
+                }
+            }
+        }
     }
 
     // MARK: - Polling
