@@ -11,11 +11,14 @@
 
 import SwiftUI
 import ScannerKit
+import CatalogClient
 
 /// Root view for the Capture tab. Displays the appropriate subview
 /// based on the current batch capture phase.
 struct CaptureView: View {
     @Environment(\.scanSessionManager) private var sessionManager
+    @Environment(\.artworkService) private var artworkService
+    @Environment(\.photoStorage) private var photoStorage
 
     var body: some View {
         NavigationStack {
@@ -45,7 +48,19 @@ struct CaptureView: View {
         case .submitting, .polling:
             BatchProgressView()
         case .completed(let status):
-            BatchCompletedView(status: status)
+            if let artworkService {
+                BatchCompletedView(
+                    status: status,
+                    artworkService: artworkService,
+                    photoStorage: photoStorage
+                )
+            } else {
+                BatchCompletedView(
+                    status: status,
+                    artworkService: NoOpArtworkService(),
+                    photoStorage: photoStorage
+                )
+            }
         case .error(let message):
             BatchErrorView(message: message)
         }
