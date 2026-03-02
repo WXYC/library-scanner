@@ -54,6 +54,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.wxyc.library-scanner
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
 
   LibraryScannerTests:
     type: bundle.unit-test
