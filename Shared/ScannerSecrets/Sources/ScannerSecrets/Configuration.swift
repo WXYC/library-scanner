@@ -34,4 +34,14 @@ public enum Configuration: Sendable {
         Secrets.authBaseURL
         #endif
     }
+
+    /// The base URL for the library-metadata-lookup service (Discogs artwork).
+    /// Production URL is the same in both debug and release since it's a public API.
+    public static var metadataLookupBaseURL: String {
+        #if DEBUG
+        "https://library-metadata-lookup-production.up.railway.app"
+        #else
+        Secrets.metadataLookupBaseURL
+        #endif
+    }
 }

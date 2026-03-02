@@ -2,8 +2,9 @@
 //  LibraryScannerApp.swift
 //  LibraryScanner
 //
-//  App entry point. Creates shared services (auth, catalog, camera, barcode)
-//  and injects them into the view hierarchy via SwiftUI environment.
+//  App entry point. Creates shared services (auth, catalog, camera, barcode,
+//  artwork, photo storage) and injects them into the view hierarchy via
+//  SwiftUI environment.
 //
 //  Created by Jake on 02/28/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
@@ -24,6 +25,9 @@ struct LibraryScannerApp: App {
     @State private var sessionManager: ScanSessionManager
     @Environment(\.scenePhase) private var scenePhase
 
+    let artworkService: any ArtworkServiceProtocol
+    let photoStorage: any PhotoStorageProtocol
+
     init() {
         #if !DEBUG
         LoggerConfiguration.shared.minimumLevel = .info
@@ -36,14 +40,18 @@ struct LibraryScannerApp: App {
         )
         let camera = PhotoCaptureService()
         let barcode = VisionBarcodeScanner()
+        let storage = FilePhotoStorage()
         let session = ScanSessionManager(
             catalogService: catalog,
             cameraService: camera,
-            barcodeScanner: barcode
+            barcodeScanner: barcode,
+            photoStorage: storage
         )
 
         _authManager = State(initialValue: auth)
         _sessionManager = State(initialValue: session)
+        artworkService = ArtworkService(baseURL: Configuration.metadataLookupBaseURL)
+        photoStorage = storage
     }
 
     var body: some Scene {
@@ -57,6 +65,8 @@ struct LibraryScannerApp: App {
             }
             .environment(\.authManager, authManager)
             .environment(\.scanSessionManager, sessionManager)
+            .environment(\.artworkService, artworkService)
+            .environment(\.photoStorage, photoStorage)
             .onAppear {
                 authManager.checkExistingSession()
             }
@@ -68,5 +78,27 @@ struct LibraryScannerApp: App {
                 }
             }
         }
+    }
+}
+
+// MARK: - Environment Keys
+
+private struct ArtworkServiceKey: EnvironmentKey {
+    static let defaultValue: (any ArtworkServiceProtocol)? = nil
+}
+
+private struct PhotoStorageKey: EnvironmentKey {
+    static let defaultValue: (any PhotoStorageProtocol)? = nil
+}
+
+extension EnvironmentValues {
+    var artworkService: (any ArtworkServiceProtocol)? {
+        get { self[ArtworkServiceKey.self] }
+        set { self[ArtworkServiceKey.self] = newValue }
+    }
+
+    var photoStorage: (any PhotoStorageProtocol)? {
+        get { self[PhotoStorageKey.self] }
+        set { self[PhotoStorageKey.self] = newValue }
     }
 }

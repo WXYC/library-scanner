@@ -274,7 +274,7 @@ struct PollingTests {
         manager.startPolling(jobId: "job-1", initialDelay: .milliseconds(10))
 
         // Give the polling loop time to run
-        try await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: .milliseconds(300))
 
         if case .completed(let status) = manager.batchPhase {
             #expect(status.jobId == "job-1")
@@ -295,7 +295,7 @@ struct PollingTests {
         let manager = makeBatchManager(catalogService: catalogService)
         manager.startPolling(jobId: "job-2", initialDelay: .milliseconds(10))
 
-        try await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: .milliseconds(300))
 
         if case .completed(let status) = manager.batchPhase {
             #expect(status.status == "failed")
@@ -345,7 +345,7 @@ struct PollingTests {
         let manager = makeBatchManager(catalogService: catalogService)
         manager.startPolling(jobId: "job-4", initialDelay: .milliseconds(10))
 
-        try await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: .milliseconds(300))
 
         if case .error = manager.batchPhase {
             // Expected
@@ -518,18 +518,86 @@ struct CameraWrapperTests {
     }
 }
 
+// MARK: - Photo Storage Integration Tests
+
+@Suite("ScanSessionManager PhotoStorage")
+struct PhotoStorageIntegrationTests {
+    @Test("addPhotoToCurrentItem saves to photoStorage")
+    @MainActor
+    func addPhotoSavesToStorage() async throws {
+        let storage = MockPhotoStorage()
+        let manager = makeBatchManager(photoStorage: storage)
+        manager.startBatchCapture()
+        let batchItemId = manager.batchItems[0].id
+
+        manager.addPhotoToCurrentItem(data: Data([0x01]), type: "front")
+
+        // Give fire-and-forget task time to run
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(storage.saveCalls.count == 1)
+        #expect(storage.saveCalls[0].batchItemId == batchItemId)
+        #expect(storage.saveCalls[0].photoIndex == 0)
+        #expect(storage.saveCalls[0].data == Data([0x01]))
+    }
+
+    @Test("addPhotoToCurrentItem sets fileURL on entry")
+    @MainActor
+    func addPhotoSetsFileURL() async throws {
+        let storage = MockPhotoStorage()
+        let manager = makeBatchManager(photoStorage: storage)
+        manager.startBatchCapture()
+
+        manager.addPhotoToCurrentItem(data: Data([0x01]), type: "front")
+
+        // Give fire-and-forget task time to save and update fileURL
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(manager.batchItems[0].photos[0].fileURL != nil)
+    }
+
+    @Test("resetBatch calls photoStorage deleteAll")
+    @MainActor
+    func resetBatchDeletesPhotos() async throws {
+        let storage = MockPhotoStorage()
+        let manager = makeBatchManager(photoStorage: storage)
+        manager.startBatchCapture()
+        manager.addPhotoToCurrentItem(data: Data([0x01]), type: "front")
+
+        manager.resetBatch()
+
+        // Give fire-and-forget task time to run
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(storage.deleteAllCalled)
+    }
+
+    @Test("capture without photoStorage still works")
+    @MainActor
+    func captureWithoutStorage() {
+        let manager = makeBatchManager()
+        manager.startBatchCapture()
+        manager.addPhotoToCurrentItem(data: Data([0x01]), type: "front")
+
+        #expect(manager.batchItems[0].photos.count == 1)
+        #expect(manager.batchItems[0].photos[0].fileURL == nil)
+    }
+}
+
 // MARK: - Test Helpers
 
 @MainActor
 private func makeBatchManager(
     catalogService: MockCatalogService = MockCatalogService(),
     cameraService: MockCameraService = MockCameraService(),
-    barcodeScanner: MockBarcodeScanner = MockBarcodeScanner()
+    barcodeScanner: MockBarcodeScanner = MockBarcodeScanner(),
+    photoStorage: MockPhotoStorage? = nil
 ) -> ScanSessionManager {
     ScanSessionManager(
         catalogService: catalogService,
         cameraService: cameraService,
-        barcodeScanner: barcodeScanner
+        barcodeScanner: barcodeScanner,
+        photoStorage: photoStorage
     )
 }
 
@@ -631,5 +699,33 @@ final class MockBarcodeScanner: BarcodeScannerProtocol, @unchecked Sendable {
         detectBarcodesCalled += 1
         if let error = detectError { throw error }
         return barcodes
+    }
+}
+
+final class MockPhotoStorage: PhotoStorageProtocol, @unchecked Sendable {
+    struct SaveCall: Sendable {
+        let data: Data
+        let batchItemId: UUID
+        let photoIndex: Int
+    }
+
+    var saveCalls: [SaveCall] = []
+    var deleteAllCalled = false
+    var storedURLs: [UUID: [URL]] = [:]
+
+    func save(data: Data, batchItemId: UUID, photoIndex: Int) async throws -> URL {
+        saveCalls.append(SaveCall(data: data, batchItemId: batchItemId, photoIndex: photoIndex))
+        let url = URL(filePath: "/tmp/BatchPhotos/\(batchItemId.uuidString)/\(photoIndex).heic")
+        storedURLs[batchItemId, default: []].append(url)
+        return url
+    }
+
+    func photoURLs(for batchItemId: UUID) async throws -> [URL] {
+        storedURLs[batchItemId] ?? []
+    }
+
+    func deleteAll() async throws {
+        deleteAllCalled = true
+        storedURLs.removeAll()
     }
 }

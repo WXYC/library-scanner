@@ -66,7 +66,7 @@ public struct CatalogItem: Sendable, Codable, Identifiable, Equatable {
 }
 
 /// Result of a Gemini extraction with confidence scores.
-public struct ExtractionResult: Sendable, Codable, Equatable {
+public struct ExtractionResult: Sendable, Codable, Hashable {
     public let labelName: ExtractionField?
     public let catalogNumber: ExtractionField?
     public let reviewText: ExtractionField?
@@ -81,7 +81,7 @@ public struct ExtractionResult: Sendable, Codable, Equatable {
 }
 
 /// A single extracted field with value and confidence.
-public struct ExtractionField: Sendable, Codable, Equatable {
+public struct ExtractionField: Sendable, Codable, Hashable {
     public let value: String
     public let confidence: Double
 
@@ -137,11 +137,12 @@ public struct BatchJobStatus: Sendable, Codable, Equatable {
 }
 
 /// Result of a single item in a batch job.
-public struct BatchResult: Sendable, Codable, Equatable {
+public struct BatchResult: Sendable, Codable, Hashable {
     public let itemIndex: Int
     public let status: String
     public let extraction: ExtractionResult?
     public let matchedAlbumId: Int?
+    public let matchedAlbum: MatchedAlbum?
     public let errorMessage: String?
 
     public init(
@@ -149,13 +150,55 @@ public struct BatchResult: Sendable, Codable, Equatable {
         status: String,
         extraction: ExtractionResult?,
         matchedAlbumId: Int?,
+        matchedAlbum: MatchedAlbum? = nil,
         errorMessage: String?
     ) {
         self.itemIndex = itemIndex
         self.status = status
         self.extraction = extraction
         self.matchedAlbumId = matchedAlbumId
+        self.matchedAlbum = matchedAlbum
         self.errorMessage = errorMessage
+    }
+}
+
+/// Album details for a matched catalog item returned in batch results.
+public struct MatchedAlbum: Sendable, Codable, Hashable {
+    public let id: Int
+    public let artistName: String
+    public let albumTitle: String
+    public let codeLetters: String
+    public let codeArtistNumber: Int
+    public let codeNumber: Int
+    public let genreName: String
+    public let formatName: String
+    public let label: String?
+
+    public init(
+        id: Int,
+        artistName: String,
+        albumTitle: String,
+        codeLetters: String,
+        codeArtistNumber: Int,
+        codeNumber: Int,
+        genreName: String,
+        formatName: String,
+        label: String?
+    ) {
+        self.id = id
+        self.artistName = artistName
+        self.albumTitle = albumTitle
+        self.codeLetters = codeLetters
+        self.codeArtistNumber = codeArtistNumber
+        self.codeNumber = codeNumber
+        self.genreName = genreName
+        self.formatName = formatName
+        self.label = label
+    }
+
+    /// The formatted library code (e.g., "ROCK AB 01/03").
+    public var libraryCode: String {
+        "\(genreName) \(codeLetters) \(String(format: "%02d", codeArtistNumber))/\(String(format: "%02d", codeNumber))"
     }
 }
 
