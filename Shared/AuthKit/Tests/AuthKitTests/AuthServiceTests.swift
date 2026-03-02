@@ -13,7 +13,7 @@ import Testing
 import Foundation
 @testable import AuthKit
 
-@Suite("AuthService")
+@Suite("AuthService", .serialized)
 struct AuthServiceTests {
     @Test("Sign in with valid credentials returns session")
     func signInSuccess() async throws {
@@ -21,7 +21,8 @@ struct AuthServiceTests {
 
         mock.handler = { request in
             #expect(request.url?.path.hasSuffix("/sign-in/email") == true)
-            let body = try! JSONDecoder().decode(SignInRequestBody.self, from: request.httpBody!)
+            let bodyData = request.httpBody ?? request.httpBodyStreamData()
+            let body = try! JSONDecoder().decode(SignInRequestBody.self, from: bodyData!)
             #expect(body.email == "dj@wxyc.org")
             #expect(body.password == "password123")
 
@@ -109,14 +110,14 @@ struct AuthServiceTests {
         #expect(stored?.refreshToken == "stored-refresh")
     }
 
-    @Test("Refresh session with valid refresh token succeeds")
+    @Test("Refresh session sends GET with Bearer token and returns new JWT")
     func refreshSuccess() async throws {
         let tokenStore = InMemoryTokenStore()
         let existingSession = AuthSession(
             accessToken: "old-token",
             refreshToken: "refresh-123",
             expiresAt: Date().addingTimeInterval(-100),
-            user: AuthUser(id: "u1", email: "dj@wxyc.org", name: nil, role: nil)
+            user: AuthUser(id: "u1", email: "dj@wxyc.org", name: "Test DJ", role: "dj")
         )
         try tokenStore.store(existingSession)
 
@@ -124,19 +125,18 @@ struct AuthServiceTests {
 
         mock.handler = { request in
             #expect(request.url?.path.hasSuffix("/token") == true)
-            let json = """
-            {
-                "token": "new-token",
-                "refreshToken": "new-refresh",
-                "expiresIn": 3600,
-                "user": {"id": "u1", "email": "dj@wxyc.org"}
-            }
-            """
-            return (json.data(using: .utf8)!, 200)
+            #expect(request.httpMethod == "GET")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer old-token")
+            #expect(request.httpBody == nil)
+            return ("{\"token\": \"new-token\"}".data(using: .utf8)!, 200)
         }
 
         let refreshed = try await service.refreshSession()
         #expect(refreshed.accessToken == "new-token")
+        #expect(refreshed.refreshToken == "refresh-123")
+        #expect(refreshed.user.email == "dj@wxyc.org")
+        #expect(refreshed.user.name == "Test DJ")
+        #expect(refreshed.user.role == "dj")
     }
 
     @Test("Refresh with no stored session throws noStoredSession")
@@ -250,4 +250,24 @@ private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+}
+
+// MARK: - URLRequest Body Helper
+
+private extension URLRequest {
+    /// Reads body data from httpBodyStream when httpBody is nil (common in URLProtocol handlers).
+    func httpBodyStreamData() -> Data? {
+        guard let stream = httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 1024)
+        defer { buffer.deallocate() }
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: 1024)
+            guard count > 0 else { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }

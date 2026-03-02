@@ -131,14 +131,11 @@ public final class AuthService: AuthServiceProtocol, @unchecked Sendable {
             throw AuthError.noStoredSession
         }
 
+        // better-auth JWT plugin: GET /token with Bearer header returns {"token": "ey..."}
         let url = URL(string: "\(baseURL)/token")!
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpMethod = "GET"
         request.setValue("Bearer \(stored.accessToken)", forHTTPHeaderField: "Authorization")
-
-        let body = RefreshRequest(refreshToken: stored.refreshToken)
-        request.httpBody = try JSONEncoder().encode(body)
 
         Log(.info, category: .auth, "Refreshing session")
 
@@ -150,11 +147,16 @@ public final class AuthService: AuthServiceProtocol, @unchecked Sendable {
 
         switch httpResponse.statusCode {
         case 200:
-            let authResponse = try decodeResponse(SignInResponse.self, from: data)
-            let authSession = authResponse.toAuthSession()
-            try tokenStore.store(authSession)
+            let tokenResponse = try decodeResponse(TokenResponse.self, from: data)
+            let refreshedSession = AuthSession(
+                accessToken: tokenResponse.token,
+                refreshToken: stored.refreshToken,
+                expiresAt: Date().addingTimeInterval(3600),
+                user: stored.user
+            )
+            try tokenStore.store(refreshedSession)
             Log(.info, category: .auth, "Session refreshed")
-            return authSession
+            return refreshedSession
         case 401:
             try? tokenStore.clear()
             throw AuthError.tokenExpired
@@ -206,8 +208,9 @@ private struct SignInRequest: Codable {
     let password: String
 }
 
-private struct RefreshRequest: Codable {
-    let refreshToken: String
+/// Response from better-auth JWT plugin `GET /token`.
+private struct TokenResponse: Codable {
+    let token: String
 }
 
 struct SignInResponse: Codable {

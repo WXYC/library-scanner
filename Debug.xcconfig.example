@@ -2,7 +2,8 @@
 //
 // Local development URLs. Copy this file to Debug.xcconfig and edit.
 // Debug.xcconfig is git-ignored; this example is committed for reference.
+// Note: use $(/)/ instead of // in URLs (// starts a comment in xcconfig).
 
-BACKEND_BASE_URL = http://localhost:8080
-AUTH_BASE_URL = http://localhost:8082/auth
-METADATA_LOOKUP_BASE_URL = https://library-metadata-lookup-production.up.railway.app
+BACKEND_BASE_URL = http:$(/)$(/)localhost:8080
+AUTH_BASE_URL = http:$(/)$(/)localhost:8082/auth
+METADATA_LOOKUP_BASE_URL = https:$(/)$(/)library-metadata-lookup-production.up.railway.app
