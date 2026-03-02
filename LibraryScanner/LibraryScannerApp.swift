@@ -25,6 +25,7 @@ struct LibraryScannerApp: App {
     @State private var sessionManager: ScanSessionManager
     @Environment(\.scenePhase) private var scenePhase
 
+    let catalogService: any CatalogServiceProtocol
     let artworkService: any ArtworkServiceProtocol
     let photoStorage: any PhotoStorageProtocol
 
@@ -50,6 +51,7 @@ struct LibraryScannerApp: App {
 
         _authManager = State(initialValue: auth)
         _sessionManager = State(initialValue: session)
+        catalogService = catalog
         artworkService = ArtworkService(baseURL: Configuration.metadataLookupBaseURL)
         photoStorage = storage
     }
@@ -65,6 +67,7 @@ struct LibraryScannerApp: App {
             }
             .environment(\.authManager, authManager)
             .environment(\.scanSessionManager, sessionManager)
+            .environment(\.catalogService, catalogService)
             .environment(\.artworkService, artworkService)
             .environment(\.photoStorage, photoStorage)
             .onAppear {
@@ -83,6 +86,10 @@ struct LibraryScannerApp: App {
 
 // MARK: - Environment Keys
 
+private struct CatalogServiceKey: EnvironmentKey {
+    static let defaultValue: (any CatalogServiceProtocol)? = nil
+}
+
 private struct ArtworkServiceKey: EnvironmentKey {
     static let defaultValue: (any ArtworkServiceProtocol)? = nil
 }
@@ -92,6 +99,11 @@ private struct PhotoStorageKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    var catalogService: (any CatalogServiceProtocol)? {
+        get { self[CatalogServiceKey.self] }
+        set { self[CatalogServiceKey.self] = newValue }
+    }
+
     var artworkService: (any ArtworkServiceProtocol)? {
         get { self[ArtworkServiceKey.self] }
         set { self[ArtworkServiceKey.self] = newValue }

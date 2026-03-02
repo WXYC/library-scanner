@@ -347,6 +347,51 @@ struct CatalogServiceTests {
         }
     }
 
+    @Test("listBatchJobs sends GET with query params and decodes PaginatedBatchJobs")
+    func listBatchJobs() async throws {
+        let (service, mock) = makeServiceWithMock()
+
+        mock.handler = { request in
+            #expect(request.httpMethod == "GET")
+            let url = request.url!
+            #expect(url.path.hasSuffix("/library/scan/batch"))
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+            let params = Dictionary(
+                uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value!) }
+            )
+            #expect(params["limit"] == "10")
+            #expect(params["offset"] == "5")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+
+            let json = """
+            {
+                "jobs": [{
+                    "jobId": "job-abc",
+                    "status": "completed",
+                    "totalItems": 3,
+                    "completedItems": 3,
+                    "failedItems": 0,
+                    "createdAt": "2026-03-01T12:00:00Z",
+                    "updatedAt": "2026-03-01T12:05:00Z"
+                }],
+                "total": 15,
+                "limit": 10,
+                "offset": 5
+            }
+            """
+            return (json.data(using: .utf8)!, 200)
+        }
+
+        let result = try await service.listBatchJobs(limit: 10, offset: 5)
+        #expect(result.jobs.count == 1)
+        #expect(result.jobs[0].jobId == "job-abc")
+        #expect(result.jobs[0].status == "completed")
+        #expect(result.jobs[0].totalItems == 3)
+        #expect(result.total == 15)
+        #expect(result.limit == 10)
+        #expect(result.offset == 5)
+    }
+
     @Test("Server 404 throws notFound")
     func serverNotFoundError() async {
         let (service, mock) = makeServiceWithMock()

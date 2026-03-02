@@ -83,7 +83,8 @@ struct BatchCompletedView: View {
 
 // MARK: - Result Card
 
-private struct BatchResultCard: View {
+/// Compact card showing a batch result summary with album, extraction, and status.
+struct BatchResultCard: View {
     let result: BatchResult
 
     var body: some View {
@@ -124,103 +125,5 @@ private struct BatchResultCard: View {
         .padding()
         .background(.fill.quaternary)
         .clipShape(.rect(cornerRadius: 12))
-    }
-}
-
-/// Displays matched album details with artist, title, library code, and catalog link.
-private struct MatchedAlbumView: View {
-    let album: MatchedAlbum
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(album.artistName)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-            Text(album.albumTitle)
-                .font(.subheadline)
-
-            HStack {
-                Label(album.libraryCode, systemImage: "books.vertical")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Text(album.formatName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .background(.fill.tertiary)
-        .clipShape(.rect(cornerRadius: 8))
-    }
-}
-
-// MARK: - Shared Extraction Views
-
-/// Displays non-nil extraction fields with confidence indicators.
-struct ExtractionFieldsView: View {
-    let extraction: ExtractionResult
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let label = extraction.labelName {
-                ExtractionRow(name: "Label", field: label)
-            }
-            if let catalog = extraction.catalogNumber {
-                ExtractionRow(name: "Catalog #", field: catalog)
-            }
-            if let upc = extraction.upc {
-                ExtractionRow(name: "UPC", field: upc)
-            }
-            if let review = extraction.reviewText {
-                ExtractionRow(name: "Review", field: review)
-            }
-        }
-    }
-}
-
-/// A single extraction field with its name, value, and confidence badge.
-struct ExtractionRow: View {
-    let name: String
-    let field: ExtractionField
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(name)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack {
-                Text(field.value)
-                    .font(.subheadline)
-                Spacer()
-                ConfidenceBadge(confidence: field.confidence)
-            }
-        }
-    }
-}
-
-/// Small colored badge showing extraction confidence.
-struct ConfidenceBadge: View {
-    let confidence: Double
-
-    var body: some View {
-        Text("\(Int(confidence * 100))%")
-            .font(.caption2)
-            .fontWeight(.medium)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(badgeColor.opacity(0.15))
-            .foregroundStyle(badgeColor)
-            .clipShape(.capsule)
-    }
-
-    private var badgeColor: Color {
-        switch confidence {
-        case 0.8...: .green
-        case 0.5...: .orange
-        default: .red
-        }
     }
 }

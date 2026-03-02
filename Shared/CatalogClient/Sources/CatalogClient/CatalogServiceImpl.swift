@@ -231,6 +231,26 @@ public final class CatalogService: CatalogServiceProtocol, @unchecked Sendable {
         try handleResponse(response)
     }
 
+    public func listBatchJobs(
+        limit: Int,
+        offset: Int
+    ) async throws -> PaginatedBatchJobs {
+        let request = try await authenticatedRequest(
+            method: "GET",
+            path: "/library/scan/batch",
+            queryItems: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "offset", value: String(offset)),
+            ]
+        )
+
+        Log(.info, category: .network, "Listing batch jobs (limit=\(limit), offset=\(offset))")
+
+        let (data, response) = try await performRequest(request)
+        try handleResponse(response)
+        return try decode(PaginatedBatchJobs.self, from: data)
+    }
+
     // MARK: - Private
 
     private func authenticatedRequest(

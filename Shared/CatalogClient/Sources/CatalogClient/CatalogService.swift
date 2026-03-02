@@ -238,6 +238,52 @@ public struct BatchContext: Sendable, Codable, Equatable {
     }
 }
 
+/// Summary of a batch job (without individual results).
+public struct BatchJobSummary: Sendable, Codable, Identifiable, Hashable {
+    public let jobId: String
+    public let status: String
+    public let totalItems: Int
+    public let completedItems: Int
+    public let failedItems: Int
+    public let createdAt: String
+    public let updatedAt: String
+
+    public var id: String { jobId }
+
+    public init(
+        jobId: String,
+        status: String,
+        totalItems: Int,
+        completedItems: Int,
+        failedItems: Int,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.jobId = jobId
+        self.status = status
+        self.totalItems = totalItems
+        self.completedItems = completedItems
+        self.failedItems = failedItems
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// Paginated list of batch job summaries.
+public struct PaginatedBatchJobs: Sendable, Codable, Equatable {
+    public let jobs: [BatchJobSummary]
+    public let total: Int
+    public let limit: Int
+    public let offset: Int
+
+    public init(jobs: [BatchJobSummary], total: Int, limit: Int, offset: Int) {
+        self.jobs = jobs
+        self.total = total
+        self.limit = limit
+        self.offset = offset
+    }
+}
+
 // MARK: - Protocol
 
 /// Protocol for catalog API operations.
@@ -262,4 +308,7 @@ public protocol CatalogServiceProtocol: Sendable {
 
     /// Upsert a review for an album.
     func upsertReview(albumId: Int, review: String, author: String?) async throws
+
+    /// List batch jobs for the authenticated user with pagination.
+    func listBatchJobs(limit: Int, offset: Int) async throws -> PaginatedBatchJobs
 }

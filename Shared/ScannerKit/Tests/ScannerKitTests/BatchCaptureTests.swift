@@ -663,6 +663,10 @@ final class MockCatalogService: CatalogServiceProtocol, @unchecked Sendable {
         upsertReviewCalled = true
         lastReviewText = review
     }
+
+    func listBatchJobs(limit: Int, offset: Int) async throws -> PaginatedBatchJobs {
+        PaginatedBatchJobs(jobs: [], total: 0, limit: limit, offset: offset)
+    }
 }
 
 @preconcurrency import AVFoundation
