@@ -17,6 +17,7 @@ build/
 
 # XcodeGen
 *.xcodeproj
+LibraryScanner/Info.plist
 
 # Swift Package Manager
 .build/
@@ -34,6 +35,9 @@ Pods/
 
 # Secrets (generated, not committed)
 Shared/ScannerSecrets/Sources/ScannerSecrets/Secrets.swift
+
+# Local debug configuration
+Debug.xcconfig
 
 # Claude
 .claude/

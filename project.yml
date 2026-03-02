@@ -13,7 +13,9 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     DEVELOPMENT_TEAM: 92V374HC38
     CODE_SIGN_STYLE: Automatic
-    INFOPLIST_KEY_NSCameraUsageDescription: "Library Scanner needs camera access to photograph album covers and labels"
+
+configFiles:
+  Debug: Debug.xcconfig
 
 configs:
   Debug: debug
@@ -55,6 +57,13 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+    info:
+      path: LibraryScanner/Info.plist
+      properties:
+        BackendBaseURL: $(BACKEND_BASE_URL)
+        AuthBaseURL: $(AUTH_BASE_URL)
+        MetadataLookupBaseURL: $(METADATA_LOOKUP_BASE_URL)
+        NSCameraUsageDescription: Library Scanner needs camera access to photograph album covers and labels
 
   LibraryScannerTests:
     type: bundle.unit-test

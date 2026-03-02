@@ -1,0 +1,8 @@
+// Debug.xcconfig
+//
+// Local development URLs. Copy this file to Debug.xcconfig and edit.
+// Debug.xcconfig is git-ignored; this example is committed for reference.
+
+BACKEND_BASE_URL = http://localhost:8080
+AUTH_BASE_URL = http://localhost:8082/auth
+METADATA_LOOKUP_BASE_URL = https://library-metadata-lookup-production.up.railway.app
