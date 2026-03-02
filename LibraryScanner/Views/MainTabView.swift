@@ -22,46 +22,16 @@ struct MainTabView: View {
             }
 
             Tab("Review", systemImage: "checklist") {
-                ReviewPlaceholderView()
+                ReviewView()
             }
 
             Tab("History", systemImage: "clock") {
-                HistoryPlaceholderView()
+                HistoryView()
             }
 
             Tab("Settings", systemImage: "gear") {
                 SettingsView()
             }
-        }
-    }
-}
-
-// MARK: - Placeholder Views
-
-/// Placeholder for the review view. Implementation in PR 8.
-private struct ReviewPlaceholderView: View {
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(
-                "Review",
-                systemImage: "checklist",
-                description: Text("Review extracted data here.")
-            )
-            .navigationTitle("Review")
-        }
-    }
-}
-
-/// Placeholder for the history view. Implementation in PR 8.
-private struct HistoryPlaceholderView: View {
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(
-                "History",
-                systemImage: "clock",
-                description: Text("Completed scans will appear here.")
-            )
-            .navigationTitle("History")
         }
     }
 }
