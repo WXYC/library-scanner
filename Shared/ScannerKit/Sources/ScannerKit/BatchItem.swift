@@ -46,6 +46,8 @@ public enum BatchPhase: Sendable, Equatable {
     case idle
     /// Actively capturing photos for a batch of records.
     case capturing
+    /// Assigning imported photos from the photo library to batch items.
+    case importing
     /// Uploading batch to the server.
     case submitting
     /// Server is processing; polling for results.
