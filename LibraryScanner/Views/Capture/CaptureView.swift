@@ -10,7 +10,9 @@
 //
 
 import SwiftUI
+import PhotosUI
 import ScannerKit
+import CameraKit
 import CatalogClient
 
 /// Root view for the Capture tab. Displays the appropriate subview
@@ -45,6 +47,8 @@ struct CaptureView: View {
             IdleCaptureView()
         case .capturing:
             BatchCameraView()
+        case .importing:
+            PhotoImportView()
         case .submitting, .polling:
             BatchProgressView()
         case .completed(let status):
@@ -67,21 +71,56 @@ struct CaptureView: View {
     }
 }
 
-/// Shown when no batch is in progress. Provides a button to start scanning.
+/// Shown when no batch is in progress. Provides buttons to start scanning
+/// with the camera or import photos from the photo library.
 private struct IdleCaptureView: View {
     @Environment(\.scanSessionManager) private var sessionManager
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var isLoadingPhotos = false
 
     var body: some View {
         ContentUnavailableView {
             Label("Ready to Scan", systemImage: "camera.viewfinder")
         } description: {
-            Text("Place records under the camera and tap to capture photos of each one.")
+            Text("Capture photos with the camera or import from your photo library.")
         } actions: {
             Button("Start Scanning") {
                 sessionManager?.startBatchCapture()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+
+            PhotosPicker(
+                selection: $selectedPhotos,
+                maxSelectionCount: ScanSessionManager.maxTotalBatchPhotos,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Label("Import from Library", systemImage: "photo.on.rectangle.angled")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(isLoadingPhotos)
+
+            if isLoadingPhotos {
+                ProgressView("Loading photos\u{2026}")
+            }
+        }
+        .onChange(of: selectedPhotos) { _, newPhotos in
+            guard !newPhotos.isEmpty else { return }
+            isLoadingPhotos = true
+            Task {
+                var photoData: [Data] = []
+                for item in newPhotos {
+                    if let rawData = try? await item.loadTransferable(type: Data.self),
+                       let processed = ImageProcessor.processToHEIF(rawData) {
+                        photoData.append(processed.imageData)
+                    }
+                }
+                sessionManager?.startPhotoImport(photoData: photoData)
+                isLoadingPhotos = false
+                selectedPhotos = []
+            }
         }
     }
 }
