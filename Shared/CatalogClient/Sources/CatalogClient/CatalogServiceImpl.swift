@@ -140,8 +140,9 @@ public final class CatalogService: CatalogServiceProtocol, @unchecked Sendable {
     ) async throws -> BatchJobCreated {
         var form = MultipartFormData()
 
-        let manifestData = try JSONEncoder().encode(items)
-        let manifestString = String(data: manifestData, encoding: .utf8) ?? "[]"
+        let manifestWrapper = ["items": items]
+        let manifestData = try JSONEncoder().encode(manifestWrapper)
+        let manifestString = String(data: manifestData, encoding: .utf8) ?? "{\"items\":[]}"
         form.addField(name: "manifest", value: manifestString)
 
         for (index, imageData) in images.enumerated() {

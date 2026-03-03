@@ -263,6 +263,10 @@ struct CatalogServiceTests {
                 let imagesMarker = Data("name=\"images\"".utf8)
                 #expect(bodyData.range(of: manifestMarker) != nil)
                 #expect(bodyData.range(of: imagesMarker) != nil)
+
+                // Verify manifest wraps items in {"items": [...]} as the server expects
+                let itemsWrapper = Data("\"items\"".utf8)
+                #expect(bodyData.range(of: itemsWrapper) != nil)
             }
 
             let json = """
