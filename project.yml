@@ -64,6 +64,7 @@ targets:
         AuthBaseURL: $(AUTH_BASE_URL)
         MetadataLookupBaseURL: $(METADATA_LOOKUP_BASE_URL)
         NSCameraUsageDescription: Library Scanner needs camera access to photograph album covers and labels
+        NSPhotoLibraryUsageDescription: Library Scanner needs photo library access to import album photos for scanning
 
   LibraryScannerTests:
     type: bundle.unit-test

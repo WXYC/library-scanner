@@ -71,6 +71,25 @@ public final class ScanSessionManager {
     /// Maximum total photos across all items in a batch.
     public static let maxTotalBatchPhotos = 50
 
+    // MARK: - Import State
+
+    /// Raw image data queued for import, awaiting user assignment.
+    public private(set) var importQueue: [Data] = []
+
+    /// Index of the photo currently being reviewed during import.
+    public private(set) var importIndex: Int = 0
+
+    /// The photo currently under review, or nil if the queue is exhausted.
+    public var currentImportPhoto: Data? {
+        guard importIndex < importQueue.count else { return nil }
+        return importQueue[importIndex]
+    }
+
+    /// Whether all import photos have been assigned or skipped.
+    public var isImportQueueExhausted: Bool {
+        importIndex >= importQueue.count
+    }
+
     /// Total number of photos across all batch items.
     public var totalBatchPhotos: Int {
         batchItems.reduce(0) { $0 + $1.photos.count }
@@ -324,12 +343,84 @@ public final class ScanSessionManager {
         }
     }
 
+    // MARK: - Photo Import
+
+    /// Begin a photo import session with pre-loaded image data.
+    public func startPhotoImport(photoData: [Data]) {
+        Log(.info, category: .scan, "Starting photo import with \(photoData.count) photos")
+        cancelPolling()
+        batchPhase = .importing
+        batchItems = [BatchItem()]
+        importQueue = photoData
+        importIndex = 0
+    }
+
+    /// Add an imported photo to the current batch item after HEIF conversion.
+    ///
+    /// Runs barcode detection on the first photo of each item. Returns `false`
+    /// if the image data could not be converted to HEIF.
+    public func addImportedPhoto(data: Data) async -> Bool {
+        guard !batchItems.isEmpty else { return false }
+        let lastIndex = batchItems.count - 1
+        guard batchItems[lastIndex].photos.count < Self.maxPhotos else {
+            Log(.warning, category: .scan, "Per-item photo limit (\(Self.maxPhotos)) reached")
+            return false
+        }
+
+        guard let processed = ImageProcessor.processToHEIF(data) else {
+            Log(.warning, category: .scan, "Failed to process imported photo to HEIF")
+            return false
+        }
+
+        let isFirstPhoto = batchItems[lastIndex].photos.isEmpty
+        let type = isFirstPhoto ? "front" : "photo"
+        addPhotoToCurrentItem(data: processed.imageData, type: type)
+
+        if isFirstPhoto {
+            do {
+                let barcodes = try await barcodeScanner.detectBarcodes(in: processed.imageData)
+                if let upc = barcodes.first?.value, batchItems.indices.contains(lastIndex) {
+                    batchItems[lastIndex].detectedUPC = upc
+                    Log(.info, category: .scan, "Detected UPC from import: \(upc)")
+                }
+            } catch {
+                Log(.warning, category: .scan, "Barcode detection failed on import: \(error)")
+            }
+        }
+
+        return true
+    }
+
+    /// Assign the current import photo to the current batch item and advance the index.
+    public func assignCurrentImportPhoto() async -> Bool {
+        guard let photoData = currentImportPhoto else { return false }
+        let result = await addImportedPhoto(data: photoData)
+        importIndex += 1
+        return result
+    }
+
+    /// Skip the current import photo without adding it.
+    public func skipCurrentImportPhoto() {
+        guard importIndex < importQueue.count else { return }
+        importIndex += 1
+        Log(.info, category: .scan, "Skipped import photo at index \(importIndex - 1)")
+    }
+
+    /// Clear the import queue. Does not change the batch phase.
+    public func finishImport() {
+        Log(.info, category: .scan, "Import finished: \(batchItems.count) items, \(totalBatchPhotos) photos")
+        importQueue = []
+        importIndex = 0
+    }
+
     /// Reset all batch state to idle.
     public func resetBatch() {
         Log(.info, category: .scan, "Resetting batch")
         cancelPolling()
         batchPhase = .idle
         batchItems = []
+        importQueue = []
+        importIndex = 0
 
         if let storage = photoStorage {
             Task {
