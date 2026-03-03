@@ -114,7 +114,11 @@ public final class AuthService: AuthServiceProtocol, @unchecked Sendable {
         switch httpResponse.statusCode {
         case 200:
             let authResponse = try decodeResponse(SignInResponse.self, from: data)
-            let authSession = authResponse.toAuthSession()
+
+            // Exchange the session token for a JWT via the better-auth JWT plugin.
+            // The backend's requirePermissions middleware validates JWTs, not session tokens.
+            let jwt = try await fetchJWT(sessionToken: authResponse.token)
+            let authSession = authResponse.toAuthSession(jwt: jwt)
             try tokenStore.store(authSession)
             Log(.info, category: .auth, "Sign-in successful")
             return authSession
@@ -126,16 +130,38 @@ public final class AuthService: AuthServiceProtocol, @unchecked Sendable {
         }
     }
 
+    /// Fetches a JWT from better-auth's token endpoint using a session token.
+    private func fetchJWT(sessionToken: String) async throws -> String {
+        let url = URL(string: "\(baseURL)/token")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await performRequest(request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.networkError("Invalid response")
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError(httpResponse.statusCode, "Failed to fetch JWT")
+        }
+
+        let tokenResponse = try decodeResponse(TokenResponse.self, from: data)
+        return tokenResponse.token
+    }
+
     public func refreshSession() async throws -> AuthSession {
         guard let stored = try? tokenStore.retrieve() else {
             throw AuthError.noStoredSession
         }
 
-        // better-auth JWT plugin: GET /token with Bearer header returns {"token": "ey..."}
+        // better-auth JWT plugin: GET /token with session Bearer header returns {"token": "ey..."}
+        // refreshToken holds the session token; accessToken holds the JWT.
         let url = URL(string: "\(baseURL)/token")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(stored.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(stored.refreshToken)", forHTTPHeaderField: "Authorization")
 
         Log(.info, category: .auth, "Refreshing session")
 
@@ -226,11 +252,11 @@ struct SignInResponse: Codable {
         let role: String?
     }
 
-    func toAuthSession() -> AuthSession {
+    func toAuthSession(jwt: String) -> AuthSession {
         let expiresAt = Date().addingTimeInterval(TimeInterval(expiresIn ?? 3600))
         return AuthSession(
-            accessToken: token,
-            refreshToken: refreshToken ?? "",
+            accessToken: jwt,
+            refreshToken: token,
             expiresAt: expiresAt,
             user: AuthUser(
                 id: user?.id ?? "",

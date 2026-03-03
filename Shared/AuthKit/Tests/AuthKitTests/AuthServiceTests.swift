@@ -15,36 +15,42 @@ import Foundation
 
 @Suite("AuthService", .serialized)
 struct AuthServiceTests {
-    @Test("Sign in with valid credentials returns session")
+    @Test("Sign in exchanges session token for JWT")
     func signInSuccess() async throws {
         let (service, mock) = makeServiceWithMock()
 
         mock.handler = { request in
-            #expect(request.url?.path.hasSuffix("/sign-in/email") == true)
-            let bodyData = request.httpBody ?? request.httpBodyStreamData()
-            let body = try! JSONDecoder().decode(SignInRequestBody.self, from: bodyData!)
-            #expect(body.email == "dj@wxyc.org")
-            #expect(body.password == "password123")
+            if request.url?.path.hasSuffix("/sign-in/email") == true {
+                let bodyData = request.httpBody ?? request.httpBodyStreamData()
+                let body = try! JSONDecoder().decode(SignInRequestBody.self, from: bodyData!)
+                #expect(body.email == "dj@wxyc.org")
+                #expect(body.password == "password123")
 
-            let json = """
-            {
-                "token": "access-token-123",
-                "refreshToken": "refresh-token-456",
-                "expiresIn": 3600,
-                "user": {
-                    "id": "user-1",
-                    "email": "dj@wxyc.org",
-                    "name": "Test DJ",
-                    "role": "dj"
+                let json = """
+                {
+                    "token": "session-token-123",
+                    "refreshToken": "unused",
+                    "expiresIn": 3600,
+                    "user": {
+                        "id": "user-1",
+                        "email": "dj@wxyc.org",
+                        "name": "Test DJ",
+                        "role": "dj"
+                    }
                 }
+                """
+                return (json.data(using: .utf8)!, 200)
+            } else {
+                // GET /token -- exchange session token for JWT
+                #expect(request.httpMethod == "GET")
+                #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer session-token-123")
+                return ("{\"token\": \"jwt-token-456\"}".data(using: .utf8)!, 200)
             }
-            """
-            return (json.data(using: .utf8)!, 200)
         }
 
         let session = try await service.signIn(email: "dj@wxyc.org", password: "password123")
-        #expect(session.accessToken == "access-token-123")
-        #expect(session.refreshToken == "refresh-token-456")
+        #expect(session.accessToken == "jwt-token-456")
+        #expect(session.refreshToken == "session-token-123")
         #expect(session.user.email == "dj@wxyc.org")
         #expect(session.user.name == "Test DJ")
         #expect(session.user.role == "dj")
@@ -86,36 +92,39 @@ struct AuthServiceTests {
         }
     }
 
-    @Test("Sign in stores session in token store")
+    @Test("Sign in stores JWT as accessToken and session token as refreshToken")
     func signInStoresSession() async throws {
         let tokenStore = InMemoryTokenStore()
         let (service, mock) = makeServiceWithMock(tokenStore: tokenStore)
 
-        mock.handler = { _ in
-            let json = """
-            {
-                "token": "stored-token",
-                "refreshToken": "stored-refresh",
-                "expiresIn": 3600,
-                "user": {"id": "u1", "email": "dj@wxyc.org"}
+        mock.handler = { request in
+            if request.url?.path.hasSuffix("/sign-in/email") == true {
+                let json = """
+                {
+                    "token": "session-token",
+                    "expiresIn": 3600,
+                    "user": {"id": "u1", "email": "dj@wxyc.org"}
+                }
+                """
+                return (json.data(using: .utf8)!, 200)
+            } else {
+                return ("{\"token\": \"jwt-token\"}".data(using: .utf8)!, 200)
             }
-            """
-            return (json.data(using: .utf8)!, 200)
         }
 
         _ = try await service.signIn(email: "dj@wxyc.org", password: "pass")
 
         let stored = try tokenStore.retrieve()
-        #expect(stored?.accessToken == "stored-token")
-        #expect(stored?.refreshToken == "stored-refresh")
+        #expect(stored?.accessToken == "jwt-token")
+        #expect(stored?.refreshToken == "session-token")
     }
 
-    @Test("Refresh session sends GET with Bearer token and returns new JWT")
+    @Test("Refresh session sends GET with session token and returns new JWT")
     func refreshSuccess() async throws {
         let tokenStore = InMemoryTokenStore()
         let existingSession = AuthSession(
-            accessToken: "old-token",
-            refreshToken: "refresh-123",
+            accessToken: "old-jwt",
+            refreshToken: "session-token-123",
             expiresAt: Date().addingTimeInterval(-100),
             user: AuthUser(id: "u1", email: "dj@wxyc.org", name: "Test DJ", role: "dj")
         )
@@ -126,14 +135,14 @@ struct AuthServiceTests {
         mock.handler = { request in
             #expect(request.url?.path.hasSuffix("/token") == true)
             #expect(request.httpMethod == "GET")
-            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer old-token")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer session-token-123")
             #expect(request.httpBody == nil)
-            return ("{\"token\": \"new-token\"}".data(using: .utf8)!, 200)
+            return ("{\"token\": \"new-jwt\"}".data(using: .utf8)!, 200)
         }
 
         let refreshed = try await service.refreshSession()
-        #expect(refreshed.accessToken == "new-token")
-        #expect(refreshed.refreshToken == "refresh-123")
+        #expect(refreshed.accessToken == "new-jwt")
+        #expect(refreshed.refreshToken == "session-token-123")
         #expect(refreshed.user.email == "dj@wxyc.org")
         #expect(refreshed.user.name == "Test DJ")
         #expect(refreshed.user.role == "dj")
