@@ -12,7 +12,6 @@
 import SwiftUI
 import PhotosUI
 import ScannerKit
-import CameraKit
 import CatalogClient
 
 /// Root view for the Capture tab. Displays the appropriate subview
@@ -21,6 +20,7 @@ struct CaptureView: View {
     @Environment(\.scanSessionManager) private var sessionManager
     @Environment(\.artworkService) private var artworkService
     @Environment(\.photoStorage) private var photoStorage
+    @State private var importItems: [PhotosPickerItem] = []
 
     var body: some View {
         NavigationStack {
@@ -44,11 +44,11 @@ struct CaptureView: View {
     private func phaseContent(for manager: ScanSessionManager) -> some View {
         switch manager.batchPhase {
         case .idle:
-            IdleCaptureView()
+            IdleCaptureView(importItems: $importItems)
         case .capturing:
             BatchCameraView()
         case .importing:
-            PhotoImportView()
+            PhotoImportView(items: $importItems)
         case .submitting, .polling:
             BatchProgressView()
         case .completed(let status):
@@ -75,8 +75,8 @@ struct CaptureView: View {
 /// with the camera or import photos from the photo library.
 private struct IdleCaptureView: View {
     @Environment(\.scanSessionManager) private var sessionManager
+    @Binding var importItems: [PhotosPickerItem]
     @State private var selectedPhotos: [PhotosPickerItem] = []
-    @State private var isLoadingPhotos = false
 
     var body: some View {
         ContentUnavailableView {
@@ -100,27 +100,12 @@ private struct IdleCaptureView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(isLoadingPhotos)
-
-            if isLoadingPhotos {
-                ProgressView("Loading photos\u{2026}")
-            }
         }
         .onChange(of: selectedPhotos) { _, newPhotos in
             guard !newPhotos.isEmpty else { return }
-            isLoadingPhotos = true
-            Task {
-                var photoData: [Data] = []
-                for item in newPhotos {
-                    if let rawData = try? await item.loadTransferable(type: Data.self),
-                       let processed = ImageProcessor.processToHEIF(rawData) {
-                        photoData.append(processed.imageData)
-                    }
-                }
-                sessionManager?.startPhotoImport(photoData: photoData)
-                isLoadingPhotos = false
-                selectedPhotos = []
-            }
+            importItems = newPhotos
+            sessionManager?.startPhotoImport(count: newPhotos.count)
+            selectedPhotos = []
         }
     }
 }
