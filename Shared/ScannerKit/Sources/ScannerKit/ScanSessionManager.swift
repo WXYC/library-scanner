@@ -73,21 +73,15 @@ public final class ScanSessionManager {
 
     // MARK: - Import State
 
-    /// Raw image data queued for import, awaiting user assignment.
-    public private(set) var importQueue: [Data] = []
+    /// Total number of photos selected for import.
+    public private(set) var importQueueCount: Int = 0
 
     /// Index of the photo currently being reviewed during import.
     public private(set) var importIndex: Int = 0
 
-    /// The photo currently under review, or nil if the queue is exhausted.
-    public var currentImportPhoto: Data? {
-        guard importIndex < importQueue.count else { return nil }
-        return importQueue[importIndex]
-    }
-
     /// Whether all import photos have been assigned or skipped.
     public var isImportQueueExhausted: Bool {
-        importIndex >= importQueue.count
+        importIndex >= importQueueCount
     }
 
     /// Total number of photos across all batch items.
@@ -345,13 +339,15 @@ public final class ScanSessionManager {
 
     // MARK: - Photo Import
 
-    /// Begin a photo import session with pre-loaded image data.
-    public func startPhotoImport(photoData: [Data]) {
-        Log(.info, category: .scan, "Starting photo import with \(photoData.count) photos")
+    /// Begin a photo import session. Photos are loaded lazily by the view layer.
+    ///
+    /// - Parameter count: The number of photos the user selected.
+    public func startPhotoImport(count: Int) {
+        Log(.info, category: .scan, "Starting photo import with \(count) photos")
         cancelPolling()
         batchPhase = .importing
         batchItems = [BatchItem()]
-        importQueue = photoData
+        importQueueCount = count
         importIndex = 0
     }
 
@@ -391,25 +387,29 @@ public final class ScanSessionManager {
         return true
     }
 
-    /// Assign the current import photo to the current batch item and advance the index.
-    public func assignCurrentImportPhoto() async -> Bool {
-        guard let photoData = currentImportPhoto else { return false }
-        let result = await addImportedPhoto(data: photoData)
+    /// Assign photo data to the current batch item and advance the import index.
+    ///
+    /// The view layer is responsible for loading the photo data from the
+    /// `PhotosPickerItem` before calling this method, keeping memory usage
+    /// to one photo at a time.
+    public func assignImportPhoto(data: Data) async -> Bool {
+        guard !isImportQueueExhausted else { return false }
+        let result = await addImportedPhoto(data: data)
         importIndex += 1
         return result
     }
 
     /// Skip the current import photo without adding it.
     public func skipCurrentImportPhoto() {
-        guard importIndex < importQueue.count else { return }
+        guard importIndex < importQueueCount else { return }
         importIndex += 1
         Log(.info, category: .scan, "Skipped import photo at index \(importIndex - 1)")
     }
 
-    /// Clear the import queue. Does not change the batch phase.
+    /// Clear the import count and index. Does not change the batch phase.
     public func finishImport() {
         Log(.info, category: .scan, "Import finished: \(batchItems.count) items, \(totalBatchPhotos) photos")
-        importQueue = []
+        importQueueCount = 0
         importIndex = 0
     }
 
@@ -419,7 +419,7 @@ public final class ScanSessionManager {
         cancelPolling()
         batchPhase = .idle
         batchItems = []
-        importQueue = []
+        importQueueCount = 0
         importIndex = 0
 
         if let storage = photoStorage {

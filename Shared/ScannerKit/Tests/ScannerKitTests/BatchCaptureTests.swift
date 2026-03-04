@@ -595,67 +595,65 @@ struct PhotoStorageIntegrationTests {
 
 @Suite("ScanSessionManager Photo Import")
 struct PhotoImportTests {
-    @Test("startPhotoImport transitions to importing with queued photos")
+    @Test("startPhotoImport transitions to importing with count")
     @MainActor
     func startPhotoImport() {
         let manager = makeBatchManager()
-        let photos = [Data([0x01]), Data([0x02]), Data([0x03])]
-        manager.startPhotoImport(photoData: photos)
+        manager.startPhotoImport(count: 3)
         #expect(manager.batchPhase == .importing)
         #expect(manager.batchItems.count == 1)
         #expect(manager.batchItems[0].photos.isEmpty)
-        #expect(manager.importQueue.count == 3)
+        #expect(manager.importQueueCount == 3)
         #expect(manager.importIndex == 0)
     }
 
-    @Test("currentImportPhoto returns photo at current index")
+    @Test("isImportQueueExhausted returns false when photos remain")
     @MainActor
-    func currentImportPhoto() {
+    func importQueueNotExhausted() {
         let manager = makeBatchManager()
-        manager.startPhotoImport(photoData: [Data([0x01]), Data([0x02])])
-        #expect(manager.currentImportPhoto == Data([0x01]))
+        manager.startPhotoImport(count: 2)
+        #expect(!manager.isImportQueueExhausted)
     }
 
-    @Test("currentImportPhoto returns nil when queue exhausted")
+    @Test("isImportQueueExhausted returns true when count is zero")
     @MainActor
-    func currentImportPhotoExhausted() {
+    func importQueueExhausted() {
         let manager = makeBatchManager()
-        manager.startPhotoImport(photoData: [])
-        #expect(manager.currentImportPhoto == nil)
+        manager.startPhotoImport(count: 0)
         #expect(manager.isImportQueueExhausted)
     }
 
-    @Test("assignCurrentImportPhoto processes HEIF and adds to current item")
+    @Test("assignImportPhoto processes HEIF and adds to current item")
     @MainActor
-    func assignCurrentImportPhoto() async {
+    func assignImportPhoto() async {
         let manager = makeBatchManager()
         let pngData = makeMinimalPNG()
-        manager.startPhotoImport(photoData: [pngData, pngData])
-        let added = await manager.assignCurrentImportPhoto()
+        manager.startPhotoImport(count: 2)
+        let added = await manager.assignImportPhoto(data: pngData)
         #expect(added)
         #expect(manager.importIndex == 1)
         #expect(manager.batchItems[0].photos.count == 1)
         #expect(manager.batchItems[0].photos[0].type == "front")
     }
 
-    @Test("assignCurrentImportPhoto assigns 'front' to first, 'photo' to subsequent")
+    @Test("assignImportPhoto assigns 'front' to first, 'photo' to subsequent")
     @MainActor
     func assignPhotoTypes() async {
         let manager = makeBatchManager()
         let pngData = makeMinimalPNG()
-        manager.startPhotoImport(photoData: [pngData, pngData])
-        _ = await manager.assignCurrentImportPhoto()
-        _ = await manager.assignCurrentImportPhoto()
+        manager.startPhotoImport(count: 2)
+        _ = await manager.assignImportPhoto(data: pngData)
+        _ = await manager.assignImportPhoto(data: pngData)
         #expect(manager.batchItems[0].photos[0].type == "front")
         #expect(manager.batchItems[0].photos[1].type == "photo")
     }
 
-    @Test("assignCurrentImportPhoto returns false for invalid data and advances")
+    @Test("assignImportPhoto returns false for invalid data and advances")
     @MainActor
     func assignInvalidData() async {
         let manager = makeBatchManager()
-        manager.startPhotoImport(photoData: [Data([0x00, 0x01])])
-        let added = await manager.assignCurrentImportPhoto()
+        manager.startPhotoImport(count: 1)
+        let added = await manager.assignImportPhoto(data: Data([0x00, 0x01]))
         #expect(!added)
         #expect(manager.importIndex == 1)
         #expect(manager.batchItems[0].photos.isEmpty)
@@ -665,7 +663,7 @@ struct PhotoImportTests {
     @MainActor
     func skipImportPhoto() {
         let manager = makeBatchManager()
-        manager.startPhotoImport(photoData: [Data([0x01]), Data([0x02])])
+        manager.startPhotoImport(count: 2)
         manager.skipCurrentImportPhoto()
         #expect(manager.importIndex == 1)
         #expect(manager.batchItems[0].photos.isEmpty)
@@ -676,10 +674,10 @@ struct PhotoImportTests {
     func finalizeCurrentItemDuringImport() async {
         let manager = makeBatchManager()
         let pngData = makeMinimalPNG()
-        manager.startPhotoImport(photoData: [pngData, pngData, pngData])
-        _ = await manager.assignCurrentImportPhoto()
+        manager.startPhotoImport(count: 3)
+        _ = await manager.assignImportPhoto(data: pngData)
         manager.finalizeCurrentItem()
-        _ = await manager.assignCurrentImportPhoto()
+        _ = await manager.assignImportPhoto(data: pngData)
         #expect(manager.batchItems.count == 2)
         #expect(manager.batchItems[0].photos.count == 1)
         #expect(manager.batchItems[1].photos.count == 1)
@@ -687,15 +685,15 @@ struct PhotoImportTests {
         #expect(manager.batchItems[1].photos[0].type == "front")
     }
 
-    @Test("finishImport clears queue and index")
+    @Test("finishImport clears count and index")
     @MainActor
     func finishImport() async {
         let manager = makeBatchManager()
         let pngData = makeMinimalPNG()
-        manager.startPhotoImport(photoData: [pngData])
-        _ = await manager.assignCurrentImportPhoto()
+        manager.startPhotoImport(count: 1)
+        _ = await manager.assignImportPhoto(data: pngData)
         manager.finishImport()
-        #expect(manager.importQueue.isEmpty)
+        #expect(manager.importQueueCount == 0)
         #expect(manager.importIndex == 0)
     }
 
@@ -706,9 +704,9 @@ struct PhotoImportTests {
         barcodeScanner.barcodes = [BarcodeResult(value: "012345678901", symbology: "ean13")]
         let manager = makeBatchManager(barcodeScanner: barcodeScanner)
         let pngData = makeMinimalPNG()
-        manager.startPhotoImport(photoData: [pngData, pngData])
-        _ = await manager.assignCurrentImportPhoto()
-        _ = await manager.assignCurrentImportPhoto()
+        manager.startPhotoImport(count: 2)
+        _ = await manager.assignImportPhoto(data: pngData)
+        _ = await manager.assignImportPhoto(data: pngData)
         #expect(barcodeScanner.detectBarcodesCalled == 1)
         #expect(manager.batchItems[0].detectedUPC == "012345678901")
     }
@@ -717,9 +715,9 @@ struct PhotoImportTests {
     @MainActor
     func resetBatchClearsImport() {
         let manager = makeBatchManager()
-        manager.startPhotoImport(photoData: [Data([0x01])])
+        manager.startPhotoImport(count: 1)
         manager.resetBatch()
-        #expect(manager.importQueue.isEmpty)
+        #expect(manager.importQueueCount == 0)
         #expect(manager.importIndex == 0)
         #expect(manager.batchPhase == .idle)
     }
@@ -730,8 +728,8 @@ struct PhotoImportTests {
         let storage = MockPhotoStorage()
         let manager = makeBatchManager(photoStorage: storage)
         let pngData = makeMinimalPNG()
-        manager.startPhotoImport(photoData: [pngData])
-        _ = await manager.assignCurrentImportPhoto()
+        manager.startPhotoImport(count: 1)
+        _ = await manager.assignImportPhoto(data: pngData)
         try await Task.sleep(for: .milliseconds(50))
         #expect(storage.saveCalls.count == 1)
     }

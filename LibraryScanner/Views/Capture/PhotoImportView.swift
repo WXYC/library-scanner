@@ -3,21 +3,31 @@
 //  LibraryScanner
 //
 //  Sequential photo assignment view for library imports. Shows imported
-//  photos one at a time for the user to assign to batch items.
+//  photos one at a time for the user to assign to batch items. Photos
+//  are loaded lazily from PhotosPickerItem references to avoid holding
+//  all images in memory at once.
 //
 //  Created by Jake on 03/03/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
 //
 
+import PhotosUI
 import SwiftUI
 import ScannerKit
 
 /// Steps through imported photos one at a time, letting the user assign
 /// each to the current batch item or start a new item group.
+///
+/// Photos are loaded lazily: only the current photo is in memory at any
+/// time. Raw data from `PhotosPickerItem` is passed directly to
+/// `ScanSessionManager.assignImportPhoto(data:)` which handles HEIF
+/// conversion internally.
 struct PhotoImportView: View {
     @Environment(\.scanSessionManager) private var sessionManager
+    @Binding var items: [PhotosPickerItem]
     @State private var isProcessing = false
     @State private var previewImage: UIImage?
+    @State private var currentPhotoData: Data?
 
     private var manager: ScanSessionManager? { sessionManager }
 
@@ -36,7 +46,7 @@ struct PhotoImportView: View {
             bottomControls
         }
         .task(id: manager?.importIndex) {
-            await loadPreviewImage()
+            await loadCurrentPhoto()
         }
     }
 }
@@ -53,7 +63,7 @@ private extension PhotoImportView {
             Spacer()
 
             if let manager, !manager.isImportQueueExhausted {
-                Text("Photo \(manager.importIndex + 1) of \(manager.importQueue.count)")
+                Text("Photo \(manager.importIndex + 1) of \(manager.importQueueCount)")
                     .font(.subheadline)
             }
 
@@ -107,10 +117,11 @@ private extension PhotoImportView {
                 .disabled(!currentItemHasPhotos || atMaxItems)
 
                 Button {
-                    guard !isProcessing else { return }
+                    guard !isProcessing, let data = currentPhotoData else { return }
                     isProcessing = true
                     Task {
-                        _ = await manager?.assignCurrentImportPhoto()
+                        _ = await manager?.assignImportPhoto(data: data)
+                        currentPhotoData = nil
                         isProcessing = false
                     }
                 } label: {
@@ -121,9 +132,10 @@ private extension PhotoImportView {
                             .font(.caption2)
                     }
                 }
-                .disabled(isProcessing || queueDone)
+                .disabled(isProcessing || queueDone || currentPhotoData == nil)
 
                 Button {
+                    currentPhotoData = nil
                     manager?.skipCurrentImportPhoto()
                 } label: {
                     VStack(spacing: 4) {
@@ -138,6 +150,7 @@ private extension PhotoImportView {
 
             HStack {
                 Button("Cancel") {
+                    items = []
                     manager?.resetBatch()
                 }
                 .buttonStyle(.bordered)
@@ -145,6 +158,7 @@ private extension PhotoImportView {
                 Spacer()
 
                 Button("Submit Batch") {
+                    items = []
                     manager?.finishImport()
                     Task {
                         await manager?.submitBatch()
@@ -159,11 +173,29 @@ private extension PhotoImportView {
         .background(.ultraThinMaterial)
     }
 
-    func loadPreviewImage() async {
-        guard let data = manager?.currentImportPhoto else {
+    /// Load the current photo on demand from the PhotosPickerItem.
+    /// Only one photo is in memory at a time.
+    func loadCurrentPhoto() async {
+        guard let manager, !manager.isImportQueueExhausted else {
             previewImage = nil
+            currentPhotoData = nil
             return
         }
-        previewImage = UIImage(data: data)
+
+        let index = manager.importIndex
+        guard index < items.count else {
+            previewImage = nil
+            currentPhotoData = nil
+            return
+        }
+
+        let item = items[index]
+        if let data = try? await item.loadTransferable(type: Data.self) {
+            currentPhotoData = data
+            previewImage = UIImage(data: data)
+        } else {
+            currentPhotoData = nil
+            previewImage = nil
+        }
     }
 }
