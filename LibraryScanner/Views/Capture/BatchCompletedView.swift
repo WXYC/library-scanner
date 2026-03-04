@@ -106,10 +106,18 @@ struct BatchResultCard: View {
 
             if let album = result.matchedAlbum {
                 MatchedAlbumView(album: album)
-            } else if let albumId = result.matchedAlbumId {
-                Text("Matched album #\(albumId)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            } else if let extraction = result.extraction,
+                      let artist = extraction.artistName?.value {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(artist)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    if let title = extraction.albumTitle?.value {
+                        Text(title)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             if let extraction = result.extraction {
