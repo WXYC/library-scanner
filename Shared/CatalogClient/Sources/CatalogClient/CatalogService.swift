@@ -67,12 +67,23 @@ public struct CatalogItem: Sendable, Codable, Identifiable, Equatable {
 
 /// Result of a Gemini extraction with confidence scores.
 public struct ExtractionResult: Sendable, Codable, Hashable {
+    public let artistName: ExtractionField?
+    public let albumTitle: ExtractionField?
     public let labelName: ExtractionField?
     public let catalogNumber: ExtractionField?
     public let reviewText: ExtractionField?
     public let upc: ExtractionField?
 
-    public init(labelName: ExtractionField?, catalogNumber: ExtractionField?, reviewText: ExtractionField?, upc: ExtractionField?) {
+    public init(
+        artistName: ExtractionField? = nil,
+        albumTitle: ExtractionField? = nil,
+        labelName: ExtractionField? = nil,
+        catalogNumber: ExtractionField? = nil,
+        reviewText: ExtractionField? = nil,
+        upc: ExtractionField? = nil
+    ) {
+        self.artistName = artistName
+        self.albumTitle = albumTitle
         self.labelName = labelName
         self.catalogNumber = catalogNumber
         self.reviewText = reviewText

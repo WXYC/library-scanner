@@ -20,10 +20,33 @@ struct BatchItemDetailView: View {
 
     @State private var artworkURL: URL?
 
+    /// Artist name from matched album or extraction.
+    private var artistName: String? {
+        result.matchedAlbum?.artistName ?? result.extraction?.artistName?.value
+    }
+
+    /// Album title from matched album or extraction.
+    private var albumTitle: String? {
+        result.matchedAlbum?.albumTitle ?? result.extraction?.albumTitle?.value
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 ArtworkSection(artworkURL: artworkURL)
+
+                if let artistName {
+                    VStack(spacing: 4) {
+                        Text(artistName)
+                            .font(.title3)
+                            .bold()
+                        if let albumTitle {
+                            Text(albumTitle)
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
 
                 if let album = result.matchedAlbum {
                     AlbumInfoSection(album: album)
@@ -33,6 +56,12 @@ struct BatchItemDetailView: View {
                     ExtractionFieldsView(extraction: extraction)
                         .padding(.horizontal)
                 }
+
+                LinksSection(
+                    artistName: artistName,
+                    albumTitle: albumTitle,
+                    matchedAlbumId: result.matchedAlbumId
+                )
 
                 if !photoURLs.isEmpty {
                     CapturedPhotosSection(photoURLs: photoURLs)
@@ -55,14 +84,58 @@ struct BatchItemDetailView: View {
     }
 
     private func loadArtwork() async {
-        guard let album = result.matchedAlbum else { return }
+        guard let artistName, let albumTitle else { return }
         do {
             artworkURL = try await artworkService.fetchArtworkURL(
-                artist: album.artistName,
-                album: album.albumTitle
+                artist: artistName,
+                album: albumTitle
             )
         } catch {
             // Artwork is supplementary; don't show errors for it
         }
+    }
+}
+
+// MARK: - Links Section
+
+private struct LinksSection: View {
+    let artistName: String?
+    let albumTitle: String?
+    let matchedAlbumId: Int?
+
+    var body: some View {
+        let hasLinks = discogsURL != nil || catalogURL != nil
+        if hasLinks {
+            VStack(spacing: 12) {
+                if let url = discogsURL {
+                    Link(destination: url) {
+                        Label("Search on Discogs", systemImage: "magnifyingglass")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if let url = catalogURL {
+                    Link(destination: url) {
+                        Label("View in Card Catalog", systemImage: "books.vertical")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private var discogsURL: URL? {
+        guard let artistName, let albumTitle else { return nil }
+        let query = "\(artistName) \(albumTitle)"
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return URL(string: "https://www.discogs.com/search?q=\(query)&type=release")
+    }
+
+    private var catalogURL: URL? {
+        guard let matchedAlbumId else { return nil }
+        return URL(string: "https://dj.wxyc.org/catalog/\(matchedAlbumId)")
     }
 }

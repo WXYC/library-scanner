@@ -93,6 +93,12 @@ struct ExtractionFieldsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let artist = extraction.artistName {
+                ExtractionRow(name: "Artist", field: artist)
+            }
+            if let album = extraction.albumTitle {
+                ExtractionRow(name: "Album", field: album)
+            }
             if let label = extraction.labelName {
                 ExtractionRow(name: "Label", field: label)
             }
