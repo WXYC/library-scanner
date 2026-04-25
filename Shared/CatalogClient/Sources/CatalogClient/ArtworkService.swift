@@ -3,8 +3,7 @@
 //  CatalogClient
 //
 //  Protocol and URLSession implementation for fetching album artwork
-//  from library-metadata-lookup's Discogs integration. Uses a two-step
-//  fetch: search for release_id, then get high-res artwork URL.
+//  from library-metadata-lookup's lookup endpoint.
 //
 //  Created by Jake on 03/01/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
@@ -18,43 +17,27 @@ import ScannerLogger
 /// Fetches album artwork URLs from the library-metadata-lookup service.
 public protocol ArtworkServiceProtocol: Sendable {
     /// Search for album artwork by artist and album name.
-    /// Returns a high-resolution (600x600) artwork URL, or nil if no results.
+    /// Returns a high-resolution artwork URL, or nil if no results.
     func fetchArtworkURL(artist: String, album: String) async throws -> URL?
 }
 
 // MARK: - Models
 
-/// Response from `POST /api/v1/discogs/search`.
-struct DiscogsSearchResponse: Decodable, Sendable {
-    let results: [DiscogsSearchResult]
+/// Response from `POST /api/v1/lookup`.
+struct LookupResponse: Decodable, Sendable {
+    let results: [LookupResultItem]
 }
 
-/// A single search result with a release ID and thumbnail.
-struct DiscogsSearchResult: Decodable, Sendable {
-    let releaseId: Int
-    let artist: String?
-    let title: String?
-    let thumbnailUrl: String?
-
-    enum CodingKeys: String, CodingKey {
-        case releaseId = "release_id"
-        case artist
-        case title
-        case thumbnailUrl = "thumbnail_url"
-    }
+/// A single lookup result pairing a library item with optional artwork.
+struct LookupResultItem: Decodable, Sendable {
+    let artwork: ArtworkResult?
 }
 
-/// Response from `GET /api/v1/discogs/release/{id}`.
-struct DiscogsReleaseResponse: Decodable, Sendable {
-    let releaseId: Int
-    let title: String?
-    let artist: String?
+/// Artwork metadata from a Discogs match.
+struct ArtworkResult: Decodable, Sendable {
     let artworkUrl: String?
 
     enum CodingKeys: String, CodingKey {
-        case releaseId = "release_id"
-        case title
-        case artist
         case artworkUrl = "artwork_url"
     }
 }
@@ -78,40 +61,25 @@ public final class ArtworkService: ArtworkServiceProtocol, @unchecked Sendable {
     }
 
     public func fetchArtworkURL(artist: String, album: String) async throws -> URL? {
-        // Step 1: Search for release
-        let searchBody = try JSONSerialization.data(withJSONObject: [
+        let body = try JSONSerialization.data(withJSONObject: [
             "artist": artist,
             "album": album,
         ])
 
-        let searchURL = URL(string: "\(baseURL)/api/v1/discogs/search")!
-        var searchRequest = URLRequest(url: searchURL)
-        searchRequest.httpMethod = "POST"
-        searchRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        searchRequest.httpBody = searchBody
+        let lookupURL = URL(string: "\(baseURL)/api/v1/lookup")!
+        var request = URLRequest(url: lookupURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
 
-        Log(.info, category: .network, "Searching Discogs for artwork: \(artist) - \(album)")
+        Log(.info, category: .network, "Looking up artwork: \(artist) - \(album)")
 
-        let (searchData, searchResponse) = try await performRequest(searchRequest)
-        try handleResponse(searchResponse)
+        let (data, response) = try await performRequest(request)
+        try handleResponse(response)
 
-        let searchResult = try decode(DiscogsSearchResponse.self, from: searchData)
-        guard let topResult = searchResult.results.first else {
-            Log(.info, category: .network, "No Discogs results for \(artist) - \(album)")
-            return nil
-        }
-
-        // Step 2: Get release details for high-res artwork
-        let releaseURL = URL(string: "\(baseURL)/api/v1/discogs/release/\(topResult.releaseId)")!
-        var releaseRequest = URLRequest(url: releaseURL)
-        releaseRequest.httpMethod = "GET"
-
-        let (releaseData, releaseResponse) = try await performRequest(releaseRequest)
-        try handleResponse(releaseResponse)
-
-        let release = try decode(DiscogsReleaseResponse.self, from: releaseData)
-        guard let artworkUrlString = release.artworkUrl else {
-            Log(.info, category: .network, "No artwork URL for release \(topResult.releaseId)")
+        let lookupResponse = try decode(LookupResponse.self, from: data)
+        guard let artworkUrlString = lookupResponse.results.first?.artwork?.artworkUrl else {
+            Log(.info, category: .network, "No artwork found for \(artist) - \(album)")
             return nil
         }
 
