@@ -3,7 +3,7 @@
 //  CatalogClient
 //
 //  Tests for ArtworkService using MockURLProtocol to verify request
-//  format and response parsing for Discogs artwork lookups.
+//  format and response parsing for lookup-based artwork fetching.
 //
 //  Created by Jake on 03/01/26.
 //  Copyright (c) 2026 WXYC. All rights reserved.
@@ -15,62 +15,53 @@ import Foundation
 
 @Suite("ArtworkService", .serialized)
 struct ArtworkServiceTests {
-    @Test("fetchArtworkURL sends POST search then GET release")
-    func searchThenRelease() async throws {
+    @Test("fetchArtworkURL sends single POST to /api/v1/lookup")
+    func sendsLookupRequest() async throws {
         let (service, mock) = makeArtworkServiceWithMock()
         var requestCount = 0
 
         mock.handler = { request in
             requestCount += 1
-            if requestCount == 1 {
-                #expect(request.httpMethod == "POST")
-                #expect(request.url!.path.hasSuffix("/api/v1/discogs/search"))
-                let contentType = request.value(forHTTPHeaderField: "Content-Type")
-                #expect(contentType == "application/json")
+            #expect(request.httpMethod == "POST")
+            #expect(request.url!.path.hasSuffix("/api/v1/lookup"))
+            let contentType = request.value(forHTTPHeaderField: "Content-Type")
+            #expect(contentType == "application/json")
 
-                if let bodyData = request.bodyData {
-                    let body = try! JSONSerialization.jsonObject(with: bodyData) as! [String: Any]
-                    #expect(body["artist"] as? String == "Radiohead")
-                    #expect(body["album"] as? String == "OK Computer")
-                }
-
-                return (searchResponseJSON(releaseId: 123), 200)
-            } else {
-                #expect(request.httpMethod == "GET")
-                #expect(request.url!.path.hasSuffix("/api/v1/discogs/release/123"))
-                return (releaseResponseJSON(artworkURL: "https://img.discogs.com/abc/600x600.jpg"), 200)
+            if let bodyData = request.bodyData {
+                let body = try! JSONSerialization.jsonObject(with: bodyData) as! [String: Any]
+                #expect(body["artist"] as? String == "Stereolab")
+                #expect(body["album"] as? String == "Aluminum Tunes")
+                #expect(body["raw_message"] as? String == "Stereolab - Aluminum Tunes")
             }
+
+            return (lookupResponseJSON(artworkURL: "https://img.discogs.com/abc/600x600.jpg"), 200)
         }
 
-        let url = try await service.fetchArtworkURL(artist: "Radiohead", album: "OK Computer")
-        #expect(requestCount == 2)
+        let url = try await service.fetchArtworkURL(artist: "Stereolab", album: "Aluminum Tunes")
+        #expect(requestCount == 1)
         #expect(url == URL(string: "https://img.discogs.com/abc/600x600.jpg"))
     }
 
-    @Test("fetchArtworkURL returns high-res URL from release")
-    func returnsHighResURL() async throws {
+    @Test("fetchArtworkURL returns artwork URL from lookup response")
+    func returnsArtworkURL() async throws {
         let (service, mock) = makeArtworkServiceWithMock()
 
-        mock.handler = { request in
-            if request.httpMethod == "POST" {
-                return (searchResponseJSON(releaseId: 456), 200)
-            } else {
-                return (releaseResponseJSON(artworkURL: "https://img.discogs.com/highres/600x600.jpg"), 200)
-            }
+        mock.handler = { _ in
+            return (lookupResponseJSON(artworkURL: "https://img.discogs.com/highres/600x600.jpg"), 200)
         }
 
-        let url = try await service.fetchArtworkURL(artist: "Test", album: "Album")
+        let url = try await service.fetchArtworkURL(artist: "Cat Power", album: "Moon Pix")
         #expect(url?.absoluteString == "https://img.discogs.com/highres/600x600.jpg")
     }
 
-    @Test("fetchArtworkURL returns nil when no search results")
+    @Test("fetchArtworkURL returns nil when no results")
     func nilWhenNoResults() async throws {
         let (service, mock) = makeArtworkServiceWithMock()
         var requestCount = 0
 
-        mock.handler = { request in
+        mock.handler = { _ in
             requestCount += 1
-            return (emptySearchResponseJSON(), 200)
+            return (emptyLookupResponseJSON(), 200)
         }
 
         let url = try await service.fetchArtworkURL(artist: "Unknown", album: "Nobody")
@@ -78,19 +69,27 @@ struct ArtworkServiceTests {
         #expect(requestCount == 1)
     }
 
-    @Test("fetchArtworkURL returns nil when release has no artwork")
+    @Test("fetchArtworkURL returns nil when artwork is nil")
     func nilWhenNoArtwork() async throws {
         let (service, mock) = makeArtworkServiceWithMock()
 
-        mock.handler = { request in
-            if request.httpMethod == "POST" {
-                return (searchResponseJSON(releaseId: 789), 200)
-            } else {
-                return (releaseResponseJSON(artworkURL: nil), 200)
-            }
+        mock.handler = { _ in
+            return (lookupResponseJSON(artworkURL: nil), 200)
         }
 
-        let url = try await service.fetchArtworkURL(artist: "Test", album: "NoArt")
+        let url = try await service.fetchArtworkURL(artist: "Jessica Pratt", album: "On Your Own Love Again")
+        #expect(url == nil)
+    }
+
+    @Test("fetchArtworkURL returns nil when result has no artwork object")
+    func nilWhenNoArtworkObject() async throws {
+        let (service, mock) = makeArtworkServiceWithMock()
+
+        mock.handler = { _ in
+            return (lookupResponseWithoutArtworkJSON(), 200)
+        }
+
+        let url = try await service.fetchArtworkURL(artist: "Juana Molina", album: "DOGA")
         #expect(url == nil)
     }
 
@@ -100,7 +99,7 @@ struct ArtworkServiceTests {
         mock.handler = nil
 
         await #expect(throws: CatalogError.self) {
-            _ = try await service.fetchArtworkURL(artist: "Test", album: "Album")
+            _ = try await service.fetchArtworkURL(artist: "Autechre", album: "Confield")
         }
     }
 
@@ -113,7 +112,7 @@ struct ArtworkServiceTests {
         }
 
         do {
-            _ = try await service.fetchArtworkURL(artist: "Test", album: "Album")
+            _ = try await service.fetchArtworkURL(artist: "Autechre", album: "Confield")
             Issue.record("Expected error to be thrown")
         } catch let error as CatalogError {
             if case .serverError(let code, _) = error {
@@ -142,42 +141,64 @@ private func makeArtworkServiceWithMock() -> (ArtworkService, MockArtworkURLProt
     return (service, MockArtworkURLProtocol.shared)
 }
 
-private func searchResponseJSON(releaseId: Int) -> Data {
+private func lookupResponseJSON(artworkURL: String?) -> Data {
+    let artworkField: String
+    if let artworkURL {
+        artworkField = """
+        {
+                        "release_id": 123,
+                        "release_url": "https://www.discogs.com/release/123",
+                        "artwork_url": "\(artworkURL)"
+                    }
+        """
+    } else {
+        artworkField = """
+        {
+                        "release_id": 123,
+                        "release_url": "https://www.discogs.com/release/123",
+                        "artwork_url": null
+                    }
+        """
+    }
+    return """
+    {
+        "results": [
+            {
+                "library_item": {
+                    "id": 1,
+                    "call_number": "R-12345",
+                    "library_url": "http://wxyc.info/catalog/12345"
+                },
+                "artwork": \(artworkField)
+            }
+        ],
+        "search_type": "direct"
+    }
+    """.data(using: .utf8)!
+}
+
+private func emptyLookupResponseJSON() -> Data {
+    """
+    {
+        "results": [],
+        "search_type": "none"
+    }
+    """.data(using: .utf8)!
+}
+
+private func lookupResponseWithoutArtworkJSON() -> Data {
     """
     {
         "results": [
             {
-                "release_id": \(releaseId),
-                "artist": "Radiohead",
-                "title": "OK Computer",
-                "thumbnail_url": "https://img.discogs.com/thumb/150x150.jpg"
+                "library_item": {
+                    "id": 1,
+                    "call_number": "R-12345",
+                    "library_url": "http://wxyc.info/catalog/12345"
+                }
             }
-        ]
-    }
-    """.data(using: .utf8)!
-}
-
-private func emptySearchResponseJSON() -> Data {
-    """
-    {
-        "results": []
-    }
-    """.data(using: .utf8)!
-}
-
-private func releaseResponseJSON(artworkURL: String?) -> Data {
-    let artworkField: String
-    if let artworkURL {
-        artworkField = "\"\(artworkURL)\""
-    } else {
-        artworkField = "null"
-    }
-    return """
-    {
-        "release_id": 123,
-        "title": "OK Computer",
-        "artist": "Radiohead",
-        "artwork_url": \(artworkField)
+        ],
+        "search_type": "direct"
     }
     """.data(using: .utf8)!
 }
